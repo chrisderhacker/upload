@@ -1,0 +1,29 @@
+services:
+  projekt-tool:
+    build: .
+    container_name: projekt-tool
+    expose:
+      - "3000"
+    volumes:
+      - ./data:/app/data
+      - ./storage:/app/storage
+    restart: unless-stopped
+    networks:
+      - coolify
+      - default
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=coolify"
+      - "traefik.http.routers.projekt-tool-http.rule=Host(`upload.derhacker.com`)"
+      - "traefik.http.routers.projekt-tool-http.entrypoints=http"
+      - "traefik.http.routers.projekt-tool-http.middlewares=projekt-tool-redirect"
+      - "traefik.http.middlewares.projekt-tool-redirect.redirectscheme.scheme=https"
+      - "traefik.http.routers.projekt-tool-https.rule=Host(`upload.derhacker.com`)"
+      - "traefik.http.routers.projekt-tool-https.entrypoints=https"
+      - "traefik.http.routers.projekt-tool-https.tls=true"
+      - "traefik.http.routers.projekt-tool-https.tls.certresolver=letsencrypt"
+      - "traefik.http.services.projekt-tool.loadbalancer.server.port=3000"
+
+networks:
+  coolify:
+    external: true

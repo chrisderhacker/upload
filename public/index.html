@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Projekt Tool</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="app">
+    <aside class="sidebar">
+      <h1>Projekte</h1>
+      <button id="newProjectBtn">+ Projekt</button>
+      <div id="projectList"></div>
+    </aside>
+
+    <section class="content">
+      <header class="topbar">
+        <div>
+          <h2 id="projectTitle">Projekt</h2>
+          <p>Dateien hochladen und previewen</p>
+        </div>
+      </header>
+
+      <div id="dropzone" class="dropzone">
+        <div>
+          <strong>Dateien hierher ziehen</strong>
+          <span>oder klicken zum Auswählen</span>
+        </div>
+        <input id="fileInput" type="file" multiple hidden />
+      </div>
+
+      <div id="fileGrid" class="file-grid"></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
