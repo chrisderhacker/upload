@@ -85,11 +85,12 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS playlists (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id INTEGER NOT NULL UNIQUE,
-    name TEXT,
+    project_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
     data TEXT NOT NULL,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    updated_by TEXT
+    updated_by TEXT,
+    UNIQUE(project_id, name)
   );
 
   CREATE TABLE IF NOT EXISTS people (
@@ -126,6 +127,30 @@ const projectColumns = db.prepare("PRAGMA table_info(projects)").all().map((c) =
 
 if (!projectColumns.includes("image")) {
   db.exec("ALTER TABLE projects ADD COLUMN image TEXT");
+}
+
+// Migration: playlists von "eine pro Projekt" (UNIQUE project_id) auf mehrere benannte pro Projekt.
+const playlistsSchema = db
+  .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'playlists'")
+  .get();
+
+if (playlistsSchema && /project_id\s+INTEGER\s+NOT\s+NULL\s+UNIQUE/i.test(playlistsSchema.sql)) {
+  db.exec(`
+    ALTER TABLE playlists RENAME TO playlists_old;
+    CREATE TABLE playlists (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      data TEXT NOT NULL,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_by TEXT,
+      UNIQUE(project_id, name)
+    );
+    INSERT INTO playlists (id, project_id, name, data, updated_at, updated_by)
+      SELECT id, project_id, COALESCE(NULLIF(TRIM(name), ''), 'Playlist'), data, updated_at, updated_by
+      FROM playlists_old;
+    DROP TABLE playlists_old;
+  `);
 }
 
 const userColumns = db.prepare("PRAGMA table_info(users)").all().map((c) => c.name);
@@ -805,12 +830,43 @@ app.get("/api/projects/:projectId/player-data", requireAuth, requireProjectAcces
   res.json({ projectTitle: project.title, clips });
 });
 
-app.get("/api/projects/:projectId/player-playlist", requireAuth, requireProjectAccess, (req, res) => {
-  const row = db.prepare("SELECT * FROM playlists WHERE project_id = ?").get(Number(req.params.projectId));
+function playlistSummary(row) {
+  let clipCount = null;
+  try {
+    clipCount = JSON.parse(row.data).clips.length;
+  } catch {
+    clipCount = null;
+  }
+  return { id: row.id, name: row.name, updated_at: row.updated_at, updated_by: row.updated_by, clipCount };
+}
+
+app.get("/api/projects/:projectId/playlists", requireAuth, requireProjectAccess, (req, res) => {
+  const rows = db
+    .prepare("SELECT * FROM playlists WHERE project_id = ? ORDER BY updated_at DESC")
+    .all(Number(req.params.projectId));
+
+  res.json(rows.map(playlistSummary));
+});
+
+function getPlaylistForUser(req, res) {
+  const row = db.prepare("SELECT * FROM playlists WHERE id = ?").get(Number(req.params.playlistId));
 
   if (!row) {
-    return res.status(404).json({ error: "Noch keine Playlist gespeichert" });
+    res.status(404).json({ error: "Playlist nicht gefunden" });
+    return null;
   }
+
+  if (!canAccessProject(req.user, row.project_id)) {
+    res.status(403).json({ error: "Kein Zugriff auf dieses Projekt" });
+    return null;
+  }
+
+  return row;
+}
+
+app.get("/api/playlists/:playlistId", requireAuth, (req, res) => {
+  const row = getPlaylistForUser(req, res);
+  if (!row) return;
 
   let payload;
   try {
@@ -819,10 +875,11 @@ app.get("/api/projects/:projectId/player-playlist", requireAuth, requireProjectA
     return res.status(500).json({ error: "Gespeicherte Playlist ist beschädigt" });
   }
 
-  res.json({ name: row.name, updated_at: row.updated_at, updated_by: row.updated_by, payload });
+  res.json({ id: row.id, name: row.name, updated_at: row.updated_at, updated_by: row.updated_by, payload });
 });
 
-app.put("/api/projects/:projectId/player-playlist", requireAuth, requireProjectAccess, (req, res) => {
+// Speichern per Name: gleicher Name überschreibt, neuer Name legt eine neue Playlist an.
+app.put("/api/projects/:projectId/playlists", requireAuth, requireProjectAccess, (req, res) => {
   const projectId = Number(req.params.projectId);
   const name = (req.body.name || "").trim() || "Playlist";
   const payload = req.body.payload;
@@ -834,15 +891,22 @@ app.put("/api/projects/:projectId/player-playlist", requireAuth, requireProjectA
   db.prepare(
     `INSERT INTO playlists (project_id, name, data, updated_at, updated_by)
      VALUES (?, ?, ?, datetime('now'), ?)
-     ON CONFLICT(project_id) DO UPDATE SET
-       name = excluded.name,
+     ON CONFLICT(project_id, name) DO UPDATE SET
        data = excluded.data,
        updated_at = excluded.updated_at,
        updated_by = excluded.updated_by`
   ).run(projectId, name, JSON.stringify(payload), req.user.name);
 
-  const row = db.prepare("SELECT name, updated_at, updated_by FROM playlists WHERE project_id = ?").get(projectId);
-  res.json({ ok: true, ...row });
+  const row = db.prepare("SELECT * FROM playlists WHERE project_id = ? AND name = ?").get(projectId, name);
+  res.json({ ok: true, ...playlistSummary(row) });
+});
+
+app.delete("/api/playlists/:playlistId", requireAuth, (req, res) => {
+  const row = getPlaylistForUser(req, res);
+  if (!row) return;
+
+  db.prepare("DELETE FROM playlists WHERE id = ?").run(row.id);
+  res.json({ ok: true });
 });
 
 /* ---------- People ---------- */

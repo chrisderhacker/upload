@@ -857,31 +857,88 @@ async function renderPlayer() {
       gespeicherte Playlist dieses Projekts – oder, falls noch keine existiert, alle Dateien aus der Show.</p>
       <div class="player-stats">
         <span class="badge ${showCount > 0 ? "badge-lime" : "badge-muted"}">${showCount} Show-Datei${showCount === 1 ? "" : "en"}</span>
-        <span class="badge badge-muted" id="playerPlaylistInfo">Playlist wird geprüft …</span>
       </div>
       <div class="player-actions">
         <a class="btn" href="/player.html?project=${currentProjectId}" target="_blank" rel="noopener">Player öffnen</a>
         <a class="btn-small btn-ghost" href="#/show">Zur Show-Ansicht</a>
       </div>
-      <p class="player-hint">Im Player: Reihenfolge per Drag & Drop, Loop/Endverhalten pro Clip –
-      „Playlist speichern“ legt alles am Server ab, sodass jedes Gerät dieselbe Playlist lädt.</p>
+      <div class="playlist-list" id="playlistList">
+        <p class="player-hint">Gespeicherte Playlists werden geladen …</p>
+      </div>
+      <p class="player-hint">Im Player: Playlist oben im Dropdown wählen und „Laden“ klicken –
+      „Playlist speichern“ legt sie unter ihrem Namen am Server ab (gleicher Name überschreibt,
+      neuer Name erstellt eine weitere Playlist).</p>
     </div>
   `;
 
   viewEl.appendChild(box);
+  renderPlaylistList();
+}
 
-  const info = document.getElementById("playerPlaylistInfo");
+async function renderPlaylistList() {
+  const listEl = document.getElementById("playlistList");
+  if (!listEl) return;
+
+  let lists = [];
   try {
-    const res = await fetch(`/api/projects/${currentProjectId}/player-playlist`);
-    if (res.ok) {
-      const saved = await res.json();
-      info.className = "badge badge-lime";
-      info.textContent = `Playlist „${saved.name}“ · ${formatDate(saved.updated_at)}${saved.updated_by ? " · " + saved.updated_by : ""}`;
-    } else {
-      info.textContent = "Noch keine Playlist gespeichert";
-    }
+    const res = await fetch(`/api/projects/${currentProjectId}/playlists`);
+    if (res.ok) lists = await res.json();
   } catch {
-    info.textContent = "Playlist-Status nicht abrufbar";
+    listEl.innerHTML = `<p class="player-hint">Playlists nicht abrufbar.</p>`;
+    return;
+  }
+
+  listEl.innerHTML = "";
+
+  if (lists.length === 0) {
+    const none = document.createElement("p");
+    none.className = "player-hint";
+    none.textContent = "Noch keine Playlist am Server gespeichert.";
+    listEl.appendChild(none);
+    return;
+  }
+
+  for (const list of lists) {
+    const row = document.createElement("div");
+    row.className = "playlist-row";
+
+    const info = document.createElement("div");
+    info.className = "playlist-row-info";
+
+    const name = document.createElement("strong");
+    name.textContent = list.name;
+
+    const meta = document.createElement("span");
+    meta.textContent = `${list.clipCount != null ? list.clipCount + " Clips · " : ""}${formatDate(list.updated_at)}${list.updated_by ? " · " + list.updated_by : ""}`;
+
+    info.appendChild(name);
+    info.appendChild(meta);
+    row.appendChild(info);
+
+    const actions = document.createElement("div");
+    actions.className = "playlist-row-actions";
+
+    const open = document.createElement("a");
+    open.className = "btn-small";
+    open.href = `/player.html?project=${currentProjectId}&list=${list.id}`;
+    open.target = "_blank";
+    open.rel = "noopener";
+    open.textContent = "Im Player öffnen";
+    actions.appendChild(open);
+
+    const del = document.createElement("button");
+    del.className = "btn-small btn-danger btn-icon";
+    del.title = "Playlist löschen";
+    del.innerHTML = icon("trash", "icon icon-sm");
+    del.onclick = async () => {
+      if (!confirm(`Playlist "${list.name}" wirklich löschen?`)) return;
+      await fetch(`/api/playlists/${list.id}`, { method: "DELETE" });
+      renderPlaylistList();
+    };
+    actions.appendChild(del);
+
+    row.appendChild(actions);
+    listEl.appendChild(row);
   }
 }
 

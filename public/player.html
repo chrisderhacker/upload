@@ -1189,7 +1189,7 @@ async function saveRundown() {
   };
 
   if(HUB_PROJECT) {
-    const res = await fetch('/api/projects/' + HUB_PROJECT + '/player-playlist', {
+    const res = await fetch('/api/projects/' + HUB_PROJECT + '/playlists', {
       method:'PUT',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({name, payload})
@@ -1198,8 +1198,10 @@ async function saveRundown() {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.error || 'Speichern am Server fehlgeschlagen (HTTP ' + res.status + ')');
     }
+    const saved = await res.json();
     setPlaylistDisplayName(name);
-    statusEl.textContent = 'Playlist am Server gespeichert · ' + new Date().toLocaleTimeString('de-AT');
+    statusEl.textContent = 'Playlist „' + name + '“ am Server gespeichert · ' + new Date().toLocaleTimeString('de-AT');
+    if(typeof refreshHubPlaylists === 'function') refreshHubPlaylists(saved.id);
     return;
   }
 
@@ -1714,58 +1716,122 @@ renderList();
 
 /* ---------- Media-Hub-Modus ---------- */
 
-async function loadHubPlaylist() {
+let hubPlaylistSelect = null;
+
+async function applyHubPayload(payload, displayName) {
+  const virtualFile = new File([JSON.stringify(payload)], 'hub-playlist.json', {type:'application/json'});
+  await loadRundownFile(virtualFile);
+
+  for(const item of playlist) {
+    if((item.type === 'video' || item.type === 'image' || item.type === 'audio') && !item.url && item.relativePath) {
+      item.url = item.relativePath.startsWith('/storage/')
+        ? item.relativePath
+        : '/storage/projects/' + HUB_PROJECT + '/' + item.relativePath;
+    }
+  }
+
+  setPlaylistDisplayName(displayName);
+  renderList();
+  generateServerThumbnails(playlist, 1);
+  rootBtn.classList.remove('primary');
+  rootLabel.textContent = 'MEDIA HUB · Projekt ' + HUB_PROJECT;
+  document.body.classList.add('serverCollapsed');
+  statusEl.textContent = playlist.length
+    ? playlist.length + ' Clips geladen · ' + displayName
+    : 'Keine Clips – im Media Hub Dateien „In Show übernehmen“.';
+}
+
+async function refreshHubPlaylists(selectedId) {
+  if(!hubPlaylistSelect) return [];
+  const res = await fetch('/api/projects/' + HUB_PROJECT + '/playlists', {cache:'no-store'});
+  if(!res.ok) return [];
+  const lists = await res.json();
+
+  hubPlaylistSelect.innerHTML = '';
+  const fresh = document.createElement('option');
+  fresh.value = '';
+  fresh.textContent = '– Neu aus Show-Dateien –';
+  hubPlaylistSelect.appendChild(fresh);
+
+  for(const list of lists) {
+    const opt = document.createElement('option');
+    opt.value = String(list.id);
+    const when = list.updated_at ? new Date(list.updated_at.replace(' ', 'T') + 'Z').toLocaleString('de-AT', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) : '';
+    opt.textContent = list.name + (list.clipCount != null ? ' · ' + list.clipCount + ' Clips' : '') + (when ? ' · ' + when : '');
+    hubPlaylistSelect.appendChild(opt);
+  }
+
+  if(selectedId != null) hubPlaylistSelect.value = String(selectedId);
+  return lists;
+}
+
+async function loadHubSelection() {
+  const id = hubPlaylistSelect ? hubPlaylistSelect.value : '';
   statusEl.textContent = 'Media Hub: Playlist wird geladen …';
   try {
-    let payload = null;
-    let displayName = '';
-
-    const savedRes = await fetch('/api/projects/' + HUB_PROJECT + '/player-playlist', {cache:'no-store'});
-    if(savedRes.ok) {
-      const saved = await savedRes.json();
-      if(saved && saved.payload && Array.isArray(saved.payload.clips)) {
-        payload = saved.payload;
-        displayName = saved.name || 'Server-Playlist';
-      }
-    } else if(savedRes.status === 401) {
-      throw new Error('Nicht angemeldet – bitte zuerst im Media Hub einloggen und den Player von dort öffnen.');
-    }
-
-    if(!payload) {
+    if(id) {
+      const res = await fetch('/api/playlists/' + id, {cache:'no-store'});
+      if(!res.ok) throw new Error('Playlist nicht ladbar (HTTP ' + res.status + ')');
+      const saved = await res.json();
+      if(!saved.payload || !Array.isArray(saved.payload.clips)) throw new Error('Playlist ist beschädigt.');
+      await applyHubPayload(saved.payload, saved.name || 'Server-Playlist');
+    } else {
       const dataRes = await fetch('/api/projects/' + HUB_PROJECT + '/player-data', {cache:'no-store'});
       if(!dataRes.ok) throw new Error('Show-Daten nicht ladbar (HTTP ' + dataRes.status + ')');
       const data = await dataRes.json();
-      payload = {app:'diecrew-player-rundown', version:4, current:0, transition:'off', clips:data.clips || []};
-      displayName = (data.projectTitle || 'Projekt') + ' · Show';
+      const payload = {app:'diecrew-player-rundown', version:4, current:0, transition:'off', clips:data.clips || []};
+      await applyHubPayload(payload, (data.projectTitle || 'Projekt') + ' · Show');
     }
+  } catch(err) {
+    statusEl.textContent = 'Media Hub: ' + (err.message || err);
+  }
+}
 
-    const virtualFile = new File([JSON.stringify(payload)], 'hub-playlist.json', {type:'application/json'});
-    await loadRundownFile(virtualFile);
+function injectHubControls() {
+  const topActions = document.querySelector('.topActions');
+  if(!topActions) return;
 
-    for(const item of playlist) {
-      if((item.type === 'video' || item.type === 'image' || item.type === 'audio') && !item.url && item.relativePath) {
-        item.url = item.relativePath.startsWith('/storage/')
-          ? item.relativePath
-          : '/storage/projects/' + HUB_PROJECT + '/' + item.relativePath;
-      }
+  hubPlaylistSelect = document.createElement('select');
+  hubPlaylistSelect.id = 'hubPlaylistSelect';
+  hubPlaylistSelect.title = 'Server-Playlist wählen';
+  hubPlaylistSelect.style.maxWidth = '260px';
+
+  const loadBtn = document.createElement('button');
+  loadBtn.type = 'button';
+  loadBtn.id = 'hubLoadBtn';
+  loadBtn.textContent = 'Laden';
+  loadBtn.addEventListener('click', () => loadHubSelection());
+
+  topActions.insertBefore(loadBtn, topActions.firstChild);
+  topActions.insertBefore(hubPlaylistSelect, loadBtn);
+}
+
+async function startHubMode() {
+  statusEl.textContent = 'Media Hub: Playlist wird geladen …';
+  try {
+    injectHubControls();
+    const lists = await refreshHubPlaylists();
+    const wantedList = new URLSearchParams(location.search).get('list');
+
+    if(lists.length) {
+      const target = wantedList && lists.some(l => String(l.id) === wantedList) ? wantedList : String(lists[0].id);
+      hubPlaylistSelect.value = target;
+      await loadHubSelection();
+    } else {
+      const check = await fetch('/api/projects/' + HUB_PROJECT + '/player-data', {cache:'no-store'});
+      if(check.status === 401) throw new Error('Nicht angemeldet – bitte zuerst im Media Hub einloggen und den Player von dort öffnen.');
+      if(!check.ok) throw new Error('Show-Daten nicht ladbar (HTTP ' + check.status + ')');
+      const data = await check.json();
+      const payload = {app:'diecrew-player-rundown', version:4, current:0, transition:'off', clips:data.clips || []};
+      await applyHubPayload(payload, (data.projectTitle || 'Projekt') + ' · Show');
     }
-
-    setPlaylistDisplayName(displayName);
-    renderList();
-    generateServerThumbnails(playlist, 1);
-    rootBtn.classList.remove('primary');
-    rootLabel.textContent = 'MEDIA HUB · Projekt ' + HUB_PROJECT;
-    document.body.classList.add('serverCollapsed');
-    statusEl.textContent = playlist.length
-      ? playlist.length + ' Clips aus dem Media Hub geladen.'
-      : 'Keine Clips – im Media Hub Dateien „In Show übernehmen“.';
   } catch(err) {
     statusEl.textContent = 'Media Hub: ' + (err.message || err);
   }
 }
 
 if(HUB_PROJECT) {
-  loadHubPlaylist();
+  startHubMode();
 } else {
   serverPlaylistUrl.value = 'https://usa.derhacker.com/GFA_k1_SERVER.json';
   serverRootUrl.value = 'https://usa.derhacker.com/CONTENT/';
