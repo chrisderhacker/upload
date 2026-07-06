@@ -3,36 +3,140 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Projekt Tool</title>
+  <title>Media Hub</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <main class="app">
+  <div id="authScreen" class="auth-screen" hidden>
+    <div class="auth-box">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <h1>Media Hub</h1>
+      </div>
+
+      <div class="auth-tabs">
+        <button id="tabLogin" class="auth-tab is-active" type="button">Anmelden</button>
+        <button id="tabRegister" class="auth-tab" type="button">Registrieren</button>
+      </div>
+
+      <p id="authMessage" class="auth-message" hidden></p>
+
+      <form id="loginForm" class="auth-form">
+        <label>E-Mail
+          <input name="email" type="email" autocomplete="email" required />
+        </label>
+        <label>Passwort
+          <span class="pw-wrap">
+            <input name="password" type="password" autocomplete="current-password" required />
+            <button class="pw-toggle" type="button" tabindex="-1" title="Passwort anzeigen"></button>
+          </span>
+        </label>
+        <button class="btn auth-submit" type="submit">Anmelden</button>
+        <button id="forgotLink" class="auth-link" type="button">Passwort vergessen?</button>
+      </form>
+
+      <form id="registerForm" class="auth-form" hidden>
+        <label>Name
+          <input name="name" type="text" autocomplete="name" required />
+        </label>
+        <label>E-Mail
+          <input name="email" type="email" autocomplete="email" required />
+        </label>
+        <label>Passwort (mind. 8 Zeichen)
+          <span class="pw-wrap">
+            <input name="password" type="password" autocomplete="new-password" minlength="8" required />
+            <button class="pw-toggle" type="button" tabindex="-1" title="Passwort anzeigen"></button>
+          </span>
+        </label>
+        <button class="btn auth-submit" type="submit">Registrieren</button>
+      </form>
+
+      <form id="forgotForm" class="auth-form" hidden>
+        <p class="auth-hint">Gib deine E-Mail ein – du bekommst einen Link, um ein neues Passwort zu setzen.</p>
+        <label>E-Mail
+          <input name="email" type="email" autocomplete="email" required />
+        </label>
+        <button class="btn auth-submit" type="submit">Link anfordern</button>
+        <button id="backToLogin" class="auth-link" type="button">Zurück zur Anmeldung</button>
+      </form>
+
+      <form id="resetForm" class="auth-form" hidden>
+        <p class="auth-hint">Neues Passwort setzen:</p>
+        <label>Neues Passwort (mind. 8 Zeichen)
+          <span class="pw-wrap">
+            <input name="password" type="password" autocomplete="new-password" minlength="8" required />
+            <button class="pw-toggle" type="button" tabindex="-1" title="Passwort anzeigen"></button>
+          </span>
+        </label>
+        <button class="btn auth-submit" type="submit">Passwort speichern</button>
+      </form>
+    </div>
+  </div>
+
+  <main class="app" id="appShell" hidden>
     <aside class="sidebar">
-      <h1>Projekte</h1>
-      <button id="newProjectBtn">+ Projekt</button>
-      <div id="projectList"></div>
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <h1>Media Hub</h1>
+      </div>
+
+      <nav class="nav">
+        <a href="#/dashboard" class="nav-link" data-view="dashboard">Dashboard</a>
+        <a href="#/uploads" class="nav-link" data-view="uploads">Uploads</a>
+        <a href="#/show" class="nav-link" data-view="show">Show</a>
+        <a href="#/admin" class="nav-link nav-admin" data-view="admin" hidden>Admin</a>
+      </nav>
+
+      <div class="sidebar-section">
+        <div class="sidebar-heading">
+          <span>Projekte</span>
+          <button id="newProjectBtn" class="btn-small" title="Neues Projekt" hidden>+</button>
+        </div>
+        <div id="projectList" class="project-list"></div>
+      </div>
+
+      <div class="user-box" id="userBox" hidden>
+        <div class="user-info">
+          <span class="user-name" id="userName"><span id="userNameText"></span> <button id="userRenameBtn" class="btn-icon-ghost" title="Namen ändern" type="button"></button></span>
+          <span class="user-role" id="userRole"></span>
+        </div>
+        <button id="logoutBtn" class="btn-small btn-ghost" title="Abmelden" type="button">Logout</button>
+      </div>
     </aside>
 
     <section class="content">
       <header class="topbar">
-        <div>
-          <h2 id="projectTitle">Projekt</h2>
-          <p>Dateien hochladen und previewen</p>
+        <div class="project-head">
+          <button id="projectAvatar" class="project-avatar" title="Projektbild ändern" type="button"></button>
+          <div>
+            <p class="crumb" id="viewCrumb">Dashboard</p>
+            <h2 class="project-title-row"><span id="projectTitle">Projekt</span> <button id="projectRenameBtn" class="btn-icon-ghost" title="Projekt umbenennen" type="button" hidden></button></h2>
+            <p class="project-stats" id="projectStats"></p>
+          </div>
         </div>
+        <input id="projectImageInput" type="file" accept="image/*" hidden />
       </header>
 
-      <div id="dropzone" class="dropzone">
-        <div>
-          <strong>Dateien hierher ziehen</strong>
-          <span>oder klicken zum Auswählen</span>
-        </div>
-        <input id="fileInput" type="file" multiple hidden />
-      </div>
-
-      <div id="fileGrid" class="file-grid"></div>
+      <div id="view"></div>
     </section>
   </main>
+
+  <div id="previewModal" class="preview-modal" hidden>
+    <div class="preview-modal-backdrop" id="pmBackdrop"></div>
+    <div class="preview-modal-box">
+      <div class="preview-modal-head">
+        <div class="preview-modal-title">
+          <strong id="pmName"></strong>
+          <span id="pmMeta"></span>
+        </div>
+        <div class="preview-modal-actions">
+          <a id="pmDownload" class="btn-small pm-download"></a>
+          <button id="pmClose" class="btn-small btn-ghost" type="button" title="Schließen"></button>
+        </div>
+      </div>
+      <div id="pmBody" class="preview-modal-body"></div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>
