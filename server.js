@@ -82,6 +82,28 @@ db.exec(`
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, project_id)
   );
+
+  CREATE TABLE IF NOT EXISTS playlists (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL UNIQUE,
+    name TEXT,
+    data TEXT NOT NULL,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_by TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS people (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    role TEXT,
+    email TEXT,
+    phone TEXT,
+    notes TEXT,
+    photo TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    created_by TEXT
+  );
 `);
 
 // Defensive Migration: neue Spalten nur ergänzen, wenn sie fehlen.
@@ -261,7 +283,7 @@ async function sendVerificationMail(user) {
 
 /* ---------- Middleware / Statisches ---------- */
 
-app.use(express.json());
+app.use(express.json({ limit: "25mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 app.use(
@@ -309,6 +331,23 @@ const projectImageUpload = multer({
         .replace(/[^a-zA-Z0-9._-]/g, "");
 
       cb(null, req.params.projectId + "_" + Date.now() + "_" + safeOriginal);
+    }
+  })
+});
+
+const personPhotoUpload = multer({
+  storage: multer.diskStorage({
+    destination: function (req, file, cb) {
+      const dir = path.join(storageDir, "people");
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename: function (req, file, cb) {
+      const safeOriginal = file.originalname
+        .replace(/\s+/g, "_")
+        .replace(/[^a-zA-Z0-9._-]/g, "");
+
+      cb(null, req.params.personId + "_" + Date.now() + "_" + safeOriginal);
     }
   })
 });
@@ -535,7 +574,20 @@ app.delete("/api/projects/:projectId", requireAuth, requireAdmin, (req, res) => 
     return res.status(404).json({ error: "Projekt nicht gefunden" });
   }
 
+  // Personenfotos dieses Projekts physisch entfernen.
+  const projectPeople = db.prepare("SELECT photo FROM people WHERE project_id = ?").all(projectId);
+  for (const person of projectPeople) {
+    if (person.photo && person.photo.startsWith("/storage/")) {
+      const photoPath = path.resolve(path.join(__dirname, person.photo.slice(1)));
+      if (photoPath.startsWith(storageDir)) {
+        fs.rmSync(photoPath, { force: true });
+      }
+    }
+  }
+
   db.prepare("DELETE FROM files WHERE project_id = ?").run(projectId);
+  db.prepare("DELETE FROM people WHERE project_id = ?").run(projectId);
+  db.prepare("DELETE FROM playlists WHERE project_id = ?").run(projectId);
   db.prepare("DELETE FROM project_members WHERE project_id = ?").run(projectId);
   db.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
 
@@ -717,6 +769,193 @@ app.delete("/api/files/:fileId", requireAuth, requireAdmin, (req, res) => {
   }
 
   db.prepare("DELETE FROM files WHERE id = ?").run(fileId);
+  res.json({ ok: true });
+});
+
+/* ---------- Player / Playlists ---------- */
+
+// Liefert die Show-Dateien eines Projekts als fertige Player-Clips.
+app.get("/api/projects/:projectId/player-data", requireAuth, requireProjectAccess, (req, res) => {
+  const projectId = Number(req.params.projectId);
+  const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(projectId);
+
+  if (!project) {
+    return res.status(404).json({ error: "Projekt nicht gefunden" });
+  }
+
+  const typeByCategory = { video: "video", audio: "audio", images: "image" };
+
+  const clips = db
+    .prepare("SELECT * FROM files WHERE project_id = ? AND area = 'show' ORDER BY created_at ASC")
+    .all(projectId)
+    .filter((f) => typeByCategory[f.category])
+    .map((f) => ({
+      type: typeByCategory[f.category],
+      fileName: f.original_name,
+      mime: f.mime_type || "",
+      relativePath: f.path,
+      thumbnail: "",
+      isLoop: false,
+      endMode: "hold",
+      startMode: "cue",
+      transitionMode: "off",
+      markColor: ""
+    }));
+
+  res.json({ projectTitle: project.title, clips });
+});
+
+app.get("/api/projects/:projectId/player-playlist", requireAuth, requireProjectAccess, (req, res) => {
+  const row = db.prepare("SELECT * FROM playlists WHERE project_id = ?").get(Number(req.params.projectId));
+
+  if (!row) {
+    return res.status(404).json({ error: "Noch keine Playlist gespeichert" });
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(row.data);
+  } catch {
+    return res.status(500).json({ error: "Gespeicherte Playlist ist beschädigt" });
+  }
+
+  res.json({ name: row.name, updated_at: row.updated_at, updated_by: row.updated_by, payload });
+});
+
+app.put("/api/projects/:projectId/player-playlist", requireAuth, requireProjectAccess, (req, res) => {
+  const projectId = Number(req.params.projectId);
+  const name = (req.body.name || "").trim() || "Playlist";
+  const payload = req.body.payload;
+
+  if (!payload || !Array.isArray(payload.clips)) {
+    return res.status(400).json({ error: "Ungültige Playlist-Daten" });
+  }
+
+  db.prepare(
+    `INSERT INTO playlists (project_id, name, data, updated_at, updated_by)
+     VALUES (?, ?, ?, datetime('now'), ?)
+     ON CONFLICT(project_id) DO UPDATE SET
+       name = excluded.name,
+       data = excluded.data,
+       updated_at = excluded.updated_at,
+       updated_by = excluded.updated_by`
+  ).run(projectId, name, JSON.stringify(payload), req.user.name);
+
+  const row = db.prepare("SELECT name, updated_at, updated_by FROM playlists WHERE project_id = ?").get(projectId);
+  res.json({ ok: true, ...row });
+});
+
+/* ---------- People ---------- */
+
+function getPersonForUser(req, res) {
+  const personId = Number(req.params.personId);
+  const person = db.prepare("SELECT * FROM people WHERE id = ?").get(personId);
+
+  if (!person) {
+    res.status(404).json({ error: "Person nicht gefunden" });
+    return null;
+  }
+
+  if (!canAccessProject(req.user, person.project_id)) {
+    res.status(403).json({ error: "Kein Zugriff auf dieses Projekt" });
+    return null;
+  }
+
+  return person;
+}
+
+app.get("/api/projects/:projectId/people", requireAuth, requireProjectAccess, (req, res) => {
+  const people = db
+    .prepare("SELECT * FROM people WHERE project_id = ? ORDER BY name COLLATE NOCASE ASC")
+    .all(req.params.projectId);
+
+  res.json(people);
+});
+
+app.post("/api/projects/:projectId/people", requireAuth, requireProjectAccess, (req, res) => {
+  const projectId = Number(req.params.projectId);
+  const name = (req.body.name || "").trim();
+
+  if (!name) {
+    return res.status(400).json({ error: "Name darf nicht leer sein" });
+  }
+
+  const result = db
+    .prepare(
+      `INSERT INTO people (project_id, name, role, email, phone, notes, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      projectId,
+      name,
+      (req.body.role || "").trim() || null,
+      (req.body.email || "").trim() || null,
+      (req.body.phone || "").trim() || null,
+      (req.body.notes || "").trim() || null,
+      req.user.name
+    );
+
+  res.json(db.prepare("SELECT * FROM people WHERE id = ?").get(result.lastInsertRowid));
+});
+
+app.patch("/api/people/:personId", requireAuth, (req, res) => {
+  const person = getPersonForUser(req, res);
+  if (!person) return;
+
+  const name = (req.body.name || "").trim();
+  if (!name) {
+    return res.status(400).json({ error: "Name darf nicht leer sein" });
+  }
+
+  db.prepare(
+    "UPDATE people SET name = ?, role = ?, email = ?, phone = ?, notes = ? WHERE id = ?"
+  ).run(
+    name,
+    (req.body.role || "").trim() || null,
+    (req.body.email || "").trim() || null,
+    (req.body.phone || "").trim() || null,
+    (req.body.notes || "").trim() || null,
+    person.id
+  );
+
+  res.json(db.prepare("SELECT * FROM people WHERE id = ?").get(person.id));
+});
+
+app.post(
+  "/api/people/:personId/photo",
+  requireAuth,
+  (req, res, next) => {
+    // Zugriff prüfen, bevor Multer die Datei schreibt.
+    if (!getPersonForUser(req, res)) return;
+    next();
+  },
+  personPhotoUpload.single("photo"),
+  (req, res) => {
+    const personId = Number(req.params.personId);
+
+    if (!req.file) {
+      return res.status(400).json({ error: "Kein Bild übermittelt" });
+    }
+
+    const relativePath = `/storage/people/${req.file.filename}`;
+    db.prepare("UPDATE people SET photo = ? WHERE id = ?").run(relativePath, personId);
+
+    res.json(db.prepare("SELECT * FROM people WHERE id = ?").get(personId));
+  }
+);
+
+app.delete("/api/people/:personId", requireAuth, (req, res) => {
+  const person = getPersonForUser(req, res);
+  if (!person) return;
+
+  if (person.photo && person.photo.startsWith("/storage/")) {
+    const photoPath = path.resolve(path.join(__dirname, person.photo.slice(1)));
+    if (photoPath.startsWith(storageDir)) {
+      fs.rmSync(photoPath, { force: true });
+    }
+  }
+
+  db.prepare("DELETE FROM people WHERE id = ?").run(person.id);
   res.json({ ok: true });
 });
 

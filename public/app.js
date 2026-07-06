@@ -2,6 +2,7 @@ let currentUser = null;
 let currentProjectId = null;
 let currentProjects = [];
 let currentFiles = [];
+let currentPeople = [];
 let currentView = "dashboard";
 let currentCategory = null;
 let uploadState = null;
@@ -74,7 +75,10 @@ const ICON_PATHS = {
   key: "M10.7577 11.8281L18.6066 3.97919L20.0208 5.3934L18.6066 6.80761L21.0815 9.28249L19.6673 10.6967L17.1924 8.22183L15.7782 9.63604L17.8995 11.7574L16.4853 13.1716L14.364 11.0503L12.1719 13.2423C13.4581 15.1837 13.246 17.8251 11.5355 19.5355C9.58291 21.4882 6.41709 21.4882 4.46447 19.5355C2.51184 17.5829 2.51184 14.4171 4.46447 12.4645C6.17493 10.754 8.81633 10.5419 10.7577 11.8281ZM10.1213 18.1213C11.2929 16.9497 11.2929 15.0503 10.1213 13.8787C8.94975 12.7071 7.05025 12.7071 5.87868 13.8787C4.70711 15.0503 4.70711 16.9497 5.87868 18.1213C7.05025 19.2929 8.94975 19.2929 10.1213 18.1213Z",
   database: "M5 12.5C5 12.8134 5.46101 13.3584 6.53047 13.8931C7.91405 14.5849 9.87677 15 12 15C14.1232 15 16.0859 14.5849 17.4695 13.8931C18.539 13.3584 19 12.8134 19 12.5V10.3287C17.35 11.3482 14.8273 12 12 12C9.17273 12 6.64996 11.3482 5 10.3287V12.5ZM19 15.3287C17.35 16.3482 14.8273 17 12 17C9.17273 17 6.64996 16.3482 5 15.3287V17.5C5 17.8134 5.46101 18.3584 6.53047 18.8931C7.91405 19.5849 9.87677 20 12 20C14.1232 20 16.0859 19.5849 17.4695 18.8931C18.539 18.3584 19 17.8134 19 17.5V15.3287ZM3 17.5V7.5C3 5.01472 7.02944 3 12 3C16.9706 3 21 5.01472 21 7.5V17.5C21 19.9853 16.9706 22 12 22C7.02944 22 3 19.9853 3 17.5ZM12 10C14.1232 10 16.0859 9.58492 17.4695 8.89313C18.539 8.3584 19 7.81342 19 7.5C19 7.18658 18.539 6.6416 17.4695 6.10687C16.0859 5.41508 14.1232 5 12 5C9.87677 5 7.91405 5.41508 6.53047 6.10687C5.46101 6.6416 5 7.18658 5 7.5C5 7.81342 5.46101 8.3584 6.53047 8.89313C7.91405 9.58492 9.87677 10 12 10Z",
   list: "M8 4H21V6H8V4ZM4.5 6.5C3.67157 6.5 3 5.82843 3 5C3 4.17157 3.67157 3.5 4.5 3.5C5.32843 3.5 6 4.17157 6 5C6 5.82843 5.32843 6.5 4.5 6.5ZM4.5 13.5C3.67157 13.5 3 12.8284 3 12C3 11.1716 3.67157 10.5 4.5 10.5C5.32843 10.5 6 11.1716 6 12C6 12.8284 5.32843 13.5 4.5 13.5ZM4.5 20.4C3.67157 20.4 3 19.7284 3 18.9C3 18.0716 3.67157 17.4 4.5 17.4C5.32843 17.4 6 18.0716 6 18.9C6 19.7284 5.32843 20.4 4.5 20.4ZM8 11H21V13H8V11ZM8 18H21V20H8V18Z",
-  grid: "M21 3C21.5523 3 22 3.44772 22 4V20C22 20.5523 21.5523 21 21 21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H21ZM11 13H4V19H11V13ZM20 13H13V19H20V13ZM11 5H4V11H11V5ZM20 5H13V11H20V5Z"
+  grid: "M21 3C21.5523 3 22 3.44772 22 4V20C22 20.5523 21.5523 21 21 21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H21ZM11 13H4V19H11V13ZM20 13H13V19H20V13ZM11 5H4V11H11V5ZM20 5H13V11H20V5Z",
+  user: "M4 22C4 17.5817 7.58172 14 12 14C16.4183 14 20 17.5817 20 22H18C18 18.6863 15.3137 16 12 16C8.68629 16 6 18.6863 6 22H4ZM12 13C8.685 13 6 10.315 6 7C6 3.685 8.685 1 12 1C15.315 1 18 3.685 18 7C18 10.315 15.315 13 12 13ZM12 11C14.21 11 16 9.21 16 7C16 4.79 14.21 3 12 3C9.79 3 8 4.79 8 7C8 9.21 9.79 11 12 11Z",
+  phone: "M9.36556 10.6821C10.302 12.3288 11.6712 13.698 13.3179 14.6344L14.2024 13.3961C14.4965 12.9845 15.0516 12.8573 15.4956 13.0998C16.9024 13.8683 18.4571 14.3353 20.0789 14.4637C20.599 14.5049 21 14.9389 21 15.4606V19.9234C21 20.4361 20.6122 20.8657 20.1022 20.9181C19.5723 20.9726 19.0377 21 18.5 21C9.93959 21 3 14.0604 3 5.5C3 4.96227 3.02742 4.42771 3.08189 3.89776C3.1343 3.38775 3.56394 3 4.07665 3H8.53942C9.0611 3 9.49513 3.40104 9.5363 3.92109C9.66467 5.54288 10.1317 7.09764 10.9002 8.50444C11.1427 8.9484 11.0155 9.50354 10.6039 9.79757L9.36556 10.6821ZM6.84425 10.0252L8.7442 8.66809C8.20547 7.50514 7.83628 6.27183 7.64727 5H5.00907C5.00303 5.16632 5 5.333 5 5.5C5 12.9558 11.0442 19 18.5 19C18.667 19 18.8337 18.997 19 18.9909V16.3527C17.7282 16.1637 16.4949 15.7945 15.3319 15.2558L13.9748 17.1558C13.4258 16.9425 12.8956 16.6915 12.3874 16.4061L12.3293 16.373C10.3697 15.2587 8.74134 13.6303 7.627 11.6707L7.59394 11.6126C7.30849 11.1044 7.05754 10.5742 6.84425 10.0252Z",
+  add: "M11 11V5H13V11H19V13H13V19H11V13H5V11H11Z"
 };
 
 function icon(name, cls) {
@@ -98,9 +102,9 @@ const SHOW_CATEGORIES = ["video", "audio", "images"];
 const AREAS = [
   { key: "uploads", label: "Uploads", desc: "Alle Medien & Dateien", view: "uploads" },
   { key: "show", label: "Show", desc: "Für die Show freigegeben", view: "show" },
-  { key: "people", label: "People", desc: "Bald verfügbar", placeholder: true },
+  { key: "people", label: "People", desc: "Beteiligte & Kontakte", view: "people" },
   { key: "regie", label: "Regie", desc: "Bald verfügbar", placeholder: true },
-  { key: "player", label: "Player", desc: "Bald verfügbar", placeholder: true },
+  { key: "player", label: "Player", desc: "Show-Playlist abspielen", view: "player" },
   { key: "exports", label: "Exports", desc: "Bald verfügbar", placeholder: true },
   { key: "archive", label: "Archive", desc: "Bald verfügbar", placeholder: true }
 ];
@@ -430,6 +434,7 @@ async function deleteProject(project) {
 async function selectProject(project) {
   currentProjectId = project.id;
   await loadFiles();
+  await loadPeople();
   await loadProjects();
   render();
 }
@@ -441,6 +446,15 @@ async function loadFiles() {
   }
   const res = await fetch(`/api/projects/${currentProjectId}/files`);
   currentFiles = res.ok ? await res.json() : [];
+}
+
+async function loadPeople() {
+  if (!currentProjectId) {
+    currentPeople = [];
+    return;
+  }
+  const res = await fetch(`/api/projects/${currentProjectId}/people`);
+  currentPeople = res.ok ? await res.json() : [];
 }
 
 function categoryCount(key) {
@@ -544,6 +558,12 @@ function render() {
   } else if (currentView === "admin") {
     viewCrumb.textContent = "Admin";
     renderAdmin();
+  } else if (currentView === "people") {
+    viewCrumb.textContent = "People";
+    renderPeople();
+  } else if (currentView === "player") {
+    viewCrumb.textContent = "Player";
+    renderPlayer();
   } else if (AREAS.some((a) => a.placeholder && a.key === currentView)) {
     const area = AREAS.find((a) => a.key === currentView);
     viewCrumb.textContent = area.label;
@@ -606,6 +626,12 @@ function renderDashboard() {
       const totalSize = currentFiles.reduce((sum, f) => sum + (f.size || 0), 0);
       desc = `Alle Medien & Dateien · ${formatBytes(totalSize)}`;
     } else if (area.key === "show") {
+      value = String(showFiles().length);
+      badge = showFiles().length > 0 ? "ready" : "leer";
+    } else if (area.key === "people") {
+      value = String(currentPeople.length);
+      badge = currentPeople.length > 0 ? "aktiv" : "leer";
+    } else if (area.key === "player") {
       value = String(showFiles().length);
       badge = showFiles().length > 0 ? "ready" : "leer";
     } else {
@@ -807,6 +833,325 @@ function renderShow() {
   viewEl.appendChild(gridWrap);
   refreshGrid();
 }
+
+/* ---------- Player ---------- */
+
+async function renderPlayer() {
+  if (!currentProjectId) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "Kein Projekt ausgewählt.";
+    viewEl.appendChild(empty);
+    return;
+  }
+
+  const box = document.createElement("div");
+  box.className = "player-view";
+
+  const showCount = showFiles().length;
+
+  box.innerHTML = `
+    <div class="player-card">
+      <h3>${icon("player", "icon area-icon")} diecrew Player</h3>
+      <p>Der Player läuft als eigenes Vollbild-Tool in einem neuen Tab. Er lädt automatisch die
+      gespeicherte Playlist dieses Projekts – oder, falls noch keine existiert, alle Dateien aus der Show.</p>
+      <div class="player-stats">
+        <span class="badge ${showCount > 0 ? "badge-lime" : "badge-muted"}">${showCount} Show-Datei${showCount === 1 ? "" : "en"}</span>
+        <span class="badge badge-muted" id="playerPlaylistInfo">Playlist wird geprüft …</span>
+      </div>
+      <div class="player-actions">
+        <a class="btn" href="/player.html?project=${currentProjectId}" target="_blank" rel="noopener">Player öffnen</a>
+        <a class="btn-small btn-ghost" href="#/show">Zur Show-Ansicht</a>
+      </div>
+      <p class="player-hint">Im Player: Reihenfolge per Drag & Drop, Loop/Endverhalten pro Clip –
+      „Playlist speichern“ legt alles am Server ab, sodass jedes Gerät dieselbe Playlist lädt.</p>
+    </div>
+  `;
+
+  viewEl.appendChild(box);
+
+  const info = document.getElementById("playerPlaylistInfo");
+  try {
+    const res = await fetch(`/api/projects/${currentProjectId}/player-playlist`);
+    if (res.ok) {
+      const saved = await res.json();
+      info.className = "badge badge-lime";
+      info.textContent = `Playlist „${saved.name}“ · ${formatDate(saved.updated_at)}${saved.updated_by ? " · " + saved.updated_by : ""}`;
+    } else {
+      info.textContent = "Noch keine Playlist gespeichert";
+    }
+  } catch {
+    info.textContent = "Playlist-Status nicht abrufbar";
+  }
+}
+
+/* ---------- People ---------- */
+
+const ROLE_SUGGESTIONS = [
+  "Regie", "Produktion", "Kamera", "Ton", "Licht", "Bühne",
+  "Cast / Darsteller", "Musik", "Grafik", "Social Media", "Kontakt"
+];
+
+function renderPeople() {
+  if (!currentProjectId) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "Kein Projekt ausgewählt.";
+    viewEl.appendChild(empty);
+    return;
+  }
+
+  const head = document.createElement("div");
+  head.className = "people-head";
+
+  const intro = document.createElement("p");
+  intro.className = "view-intro";
+  intro.textContent = "Beteiligte, Crew und Kontakte für dieses Projekt.";
+  head.appendChild(intro);
+
+  const addBtn = document.createElement("button");
+  addBtn.className = "btn people-add";
+  addBtn.innerHTML = icon("add", "icon icon-sm") + " Person hinzufügen";
+  addBtn.onclick = () => openPersonForm(null);
+  head.appendChild(addBtn);
+
+  viewEl.appendChild(head);
+
+  if (currentPeople.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "Noch keine Personen – oben rechts „Person hinzufügen“.";
+    viewEl.appendChild(empty);
+    return;
+  }
+
+  const grid = document.createElement("div");
+  grid.className = "people-grid";
+
+  for (const person of currentPeople) {
+    grid.appendChild(buildPersonCard(person));
+  }
+
+  viewEl.appendChild(grid);
+}
+
+function buildPersonCard(person) {
+  const card = document.createElement("div");
+  card.className = "person-card";
+
+  const avatar = document.createElement("div");
+  avatar.className = "person-avatar";
+  if (person.photo) {
+    const img = document.createElement("img");
+    img.src = person.photo;
+    img.alt = person.name;
+    avatar.appendChild(img);
+  } else {
+    avatar.innerHTML = icon("user", "icon person-avatar-icon");
+  }
+  card.appendChild(avatar);
+
+  const body = document.createElement("div");
+  body.className = "person-body";
+
+  const name = document.createElement("div");
+  name.className = "person-name";
+  name.textContent = person.name;
+  body.appendChild(name);
+
+  if (person.role) {
+    const role = document.createElement("span");
+    role.className = "badge badge-lime person-role";
+    role.textContent = person.role;
+    body.appendChild(role);
+  }
+
+  const contact = document.createElement("div");
+  contact.className = "person-contact";
+
+  if (person.email) {
+    const a = document.createElement("a");
+    a.href = "mailto:" + person.email;
+    a.innerHTML = icon("mail", "icon icon-sm");
+    a.append(" " + person.email);
+    contact.appendChild(a);
+  }
+  if (person.phone) {
+    const a = document.createElement("a");
+    a.href = "tel:" + person.phone.replace(/\s+/g, "");
+    a.innerHTML = icon("phone", "icon icon-sm");
+    a.append(" " + person.phone);
+    contact.appendChild(a);
+  }
+  if (person.email || person.phone) body.appendChild(contact);
+
+  if (person.notes) {
+    const notes = document.createElement("p");
+    notes.className = "person-notes";
+    notes.textContent = person.notes;
+    body.appendChild(notes);
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "person-actions";
+
+  const edit = document.createElement("button");
+  edit.className = "btn-small btn-ghost";
+  edit.innerHTML = icon("edit", "icon icon-sm") + " Bearbeiten";
+  edit.onclick = () => openPersonForm(person);
+  actions.appendChild(edit);
+
+  const del = document.createElement("button");
+  del.className = "btn-small btn-danger btn-icon";
+  del.title = "Person entfernen";
+  del.innerHTML = icon("trash", "icon icon-sm");
+  del.onclick = () => deletePerson(person);
+  actions.appendChild(del);
+
+  body.appendChild(actions);
+  card.appendChild(body);
+
+  return card;
+}
+
+async function deletePerson(person) {
+  if (!confirm(`"${person.name}" wirklich aus dem Projekt entfernen?`)) return;
+
+  const res = await fetch(`/api/people/${person.id}`, { method: "DELETE" });
+  if (!res.ok) return;
+
+  await loadPeople();
+  await loadProjects();
+  render();
+}
+
+/* ---------- People-Formular (Modal) ---------- */
+
+const personModal = document.getElementById("personModal");
+const personBackdrop = document.getElementById("personBackdrop");
+const personClose = document.getElementById("personClose");
+const personForm = document.getElementById("personForm");
+const personModalTitle = document.getElementById("personModalTitle");
+const personPhotoBtn = document.getElementById("personPhotoBtn");
+const personPhotoInput = document.getElementById("personPhotoInput");
+const personFormError = document.getElementById("personFormError");
+const roleSuggestions = document.getElementById("roleSuggestions");
+
+let editingPersonId = null;
+let pendingPhotoFile = null;
+
+function closePersonForm() {
+  personModal.hidden = true;
+  personForm.reset();
+  editingPersonId = null;
+  pendingPhotoFile = null;
+}
+
+personBackdrop.onclick = closePersonForm;
+personClose.onclick = closePersonForm;
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !personModal.hidden) closePersonForm();
+});
+
+function renderPhotoButton(src) {
+  personPhotoBtn.innerHTML = "";
+  if (src) {
+    const img = document.createElement("img");
+    img.src = src;
+    img.alt = "";
+    personPhotoBtn.appendChild(img);
+  } else {
+    personPhotoBtn.innerHTML = icon("user", "icon person-avatar-icon");
+  }
+}
+
+personPhotoBtn.onclick = () => personPhotoInput.click();
+personPhotoInput.onchange = () => {
+  const file = personPhotoInput.files[0];
+  if (!file) return;
+  pendingPhotoFile = file;
+  renderPhotoButton(URL.createObjectURL(file));
+};
+
+function openPersonForm(person) {
+  editingPersonId = person ? person.id : null;
+  pendingPhotoFile = null;
+  personFormError.hidden = true;
+  personModalTitle.textContent = person ? "Person bearbeiten" : "Person hinzufügen";
+
+  personClose.innerHTML = icon("close", "icon icon-sm");
+
+  roleSuggestions.innerHTML = "";
+  for (const role of ROLE_SUGGESTIONS) {
+    const opt = document.createElement("option");
+    opt.value = role;
+    roleSuggestions.appendChild(opt);
+  }
+
+  personForm.name.value = person ? person.name || "" : "";
+  personForm.role.value = person ? person.role || "" : "";
+  personForm.email.value = person ? person.email || "" : "";
+  personForm.phone.value = person ? person.phone || "" : "";
+  personForm.notes.value = person ? person.notes || "" : "";
+  renderPhotoButton(person ? person.photo : null);
+
+  personModal.hidden = false;
+  personForm.name.focus();
+}
+
+personForm.onsubmit = async (e) => {
+  e.preventDefault();
+  personFormError.hidden = true;
+
+  const data = {
+    name: personForm.name.value.trim(),
+    role: personForm.role.value.trim(),
+    email: personForm.email.value.trim(),
+    phone: personForm.phone.value.trim(),
+    notes: personForm.notes.value.trim()
+  };
+
+  if (!data.name) {
+    personFormError.textContent = "Bitte einen Namen angeben.";
+    personFormError.hidden = false;
+    return;
+  }
+
+  let res;
+  if (editingPersonId) {
+    res = await fetch(`/api/people/${editingPersonId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data)
+    });
+  } else {
+    res = await fetch(`/api/projects/${currentProjectId}/people`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data)
+    });
+  }
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    personFormError.textContent = body.error || "Speichern fehlgeschlagen.";
+    personFormError.hidden = false;
+    return;
+  }
+
+  const saved = await res.json();
+
+  if (pendingPhotoFile) {
+    const formData = new FormData();
+    formData.append("photo", pendingPhotoFile);
+    await fetch(`/api/people/${saved.id}/photo`, { method: "POST", body: formData });
+  }
+
+  closePersonForm();
+  await loadPeople();
+  await loadProjects();
+  render();
+};
 
 function renderPlaceholder(area) {
   const box = document.createElement("div");

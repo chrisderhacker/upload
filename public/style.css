@@ -1210,6 +1210,238 @@ body {
   cursor: zoom-in;
 }
 
+/* ---------- Player-View ---------- */
+
+.player-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.player-card h3 {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.player-card p {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.player-stats {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.player-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.player-hint {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+/* ---------- People ---------- */
+
+.people-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.people-head .view-intro {
+  margin: 0;
+}
+
+.people-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.people-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+  gap: 14px;
+}
+
+.person-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  gap: 14px;
+}
+
+.person-avatar {
+  flex: 0 0 56px;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: var(--bg-raise);
+  border: 1px solid var(--border);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: var(--text-dim);
+}
+
+.person-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.person-avatar-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.person-body {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.person-name {
+  font-weight: 800;
+  font-size: 16px;
+}
+
+.person-role {
+  align-self: flex-start;
+}
+
+.person-contact {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 2px;
+}
+
+.person-contact a {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.person-contact a:hover {
+  color: var(--lime);
+}
+
+.person-notes {
+  margin: 2px 0 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+.person-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.person-actions .btn-small {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* People-Formular */
+
+.person-modal-box {
+  position: relative;
+  width: min(440px, 94vw);
+  max-height: 90vh;
+  overflow: auto;
+  background: var(--bg-raise);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  display: flex;
+  flex-direction: column;
+}
+
+.person-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+}
+
+.person-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.person-form input,
+.person-form textarea {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.person-form input:focus,
+.person-form textarea:focus {
+  outline: none;
+  border-color: var(--lime);
+}
+
+.person-form-photo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.person-avatar-edit {
+  cursor: pointer;
+  padding: 0;
+}
+
+.person-avatar-edit:hover {
+  border-color: var(--lime);
+}
+
+.person-photo-hint {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
 /* ---------- Preview-Modal ---------- */
 
 .preview-modal {

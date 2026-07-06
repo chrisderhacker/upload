@@ -138,6 +138,41 @@
     </div>
   </div>
 
+  <div id="personModal" class="preview-modal" hidden>
+    <div class="preview-modal-backdrop" id="personBackdrop"></div>
+    <div class="person-modal-box">
+      <div class="preview-modal-head">
+        <strong id="personModalTitle">Person</strong>
+        <button id="personClose" class="btn-small btn-ghost" type="button" title="Schließen"></button>
+      </div>
+      <form id="personForm" class="person-form">
+        <div class="person-form-photo">
+          <button type="button" id="personPhotoBtn" class="person-avatar person-avatar-edit" title="Foto ändern"></button>
+          <input id="personPhotoInput" type="file" accept="image/*" hidden />
+          <span class="person-photo-hint">Foto (optional)</span>
+        </div>
+        <label>Name *
+          <input name="name" type="text" required />
+        </label>
+        <label>Rolle / Funktion
+          <input name="role" type="text" list="roleSuggestions" placeholder="z.B. Regie, Kamera, Cast …" />
+          <datalist id="roleSuggestions"></datalist>
+        </label>
+        <label>E-Mail
+          <input name="email" type="email" />
+        </label>
+        <label>Telefon
+          <input name="phone" type="tel" />
+        </label>
+        <label>Notiz
+          <textarea name="notes" rows="3"></textarea>
+        </label>
+        <p id="personFormError" class="auth-message is-error" hidden></p>
+        <button class="btn" type="submit">Speichern</button>
+      </form>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>
