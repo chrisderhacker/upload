@@ -1037,6 +1037,58 @@ app.get("/api/admin/users", requireAuth, requireAdmin, (req, res) => {
   );
 });
 
+app.post("/api/admin/users", requireAuth, requireAdmin, (req, res) => {
+  const name = (req.body.name || "").trim();
+  const email = (req.body.email || "").trim().toLowerCase();
+  const password = req.body.password || "";
+  const role = req.body.role === "admin" ? "admin" : "user";
+  const projectIds = Array.isArray(req.body.projectIds)
+    ? req.body.projectIds.map(Number).filter((id) => Number.isInteger(id) && id > 0)
+    : [];
+
+  if (!name || !email || !email.includes("@")) {
+    return res.status(400).json({ error: "Bitte Name und gültige E-Mail angeben" });
+  }
+  if (password.length < 8) {
+    return res.status(400).json({ error: "Passwort muss mindestens 8 Zeichen haben" });
+  }
+  if (db.prepare("SELECT 1 FROM users WHERE email = ?").get(email)) {
+    return res.status(409).json({ error: "Diese E-Mail ist bereits registriert" });
+  }
+
+  const validProjectIds = projectIds.filter((projectId) =>
+    db.prepare("SELECT 1 FROM projects WHERE id = ?").get(projectId)
+  );
+
+  const createUser = db.transaction(() => {
+    const result = db
+      .prepare(
+        `INSERT INTO users (name, email, password_hash, role, email_verified, verify_token)
+         VALUES (?, ?, ?, ?, 1, NULL)`
+      )
+      .run(name, email, hashPassword(password), role);
+
+    const userId = result.lastInsertRowid;
+
+    if (role !== "admin") {
+      const addMembership = db.prepare("INSERT OR IGNORE INTO project_members (user_id, project_id) VALUES (?, ?)");
+      for (const projectId of validProjectIds) {
+        addMembership.run(userId, projectId);
+      }
+    }
+
+    return userId;
+  });
+
+  const userId = createUser();
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
+
+  res.status(201).json({
+    ...publicUser(user),
+    projects: role === "admin" ? [] : validProjectIds
+  });
+});
+
 app.post("/api/admin/users/:userId/verify", requireAuth, requireAdmin, (req, res) => {
   const userId = Number(req.params.userId);
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);

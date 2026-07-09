@@ -1238,8 +1238,122 @@ async function renderAdmin() {
 
   const intro = document.createElement("p");
   intro.className = "view-intro";
-  intro.textContent = "Alle registrierten User – bestätigen, für Projekte freigeben oder entfernen.";
+  intro.textContent = "User selbst anlegen, bestätigen, für Projekte freigeben oder entfernen.";
   viewEl.appendChild(intro);
+
+  const createCard = document.createElement("form");
+  createCard.className = "admin-card admin-create-user";
+  createCard.innerHTML = `
+    <div class="admin-create-head">
+      <div>
+        <h3>${icon("add", "icon icon-sm")} User anlegen</h3>
+        <p>Das Konto ist sofort bestätigt. Normale User können direkt für Projekte freigegeben werden.</p>
+      </div>
+      <button class="btn" type="submit">User erstellen</button>
+    </div>
+    <div class="admin-create-grid">
+      <label>Name
+        <input name="name" type="text" autocomplete="off" required />
+      </label>
+      <label>E-Mail
+        <input name="email" type="email" autocomplete="off" required />
+      </label>
+      <label>Passwort
+        <input name="password" type="password" minlength="8" autocomplete="new-password" required />
+      </label>
+      <label>Rolle
+        <select name="role">
+          <option value="user">User</option>
+          <option value="admin">Admin</option>
+        </select>
+      </label>
+    </div>
+  `;
+
+  const projectBox = document.createElement("div");
+  projectBox.className = "admin-create-projects";
+
+  const projectHeading = document.createElement("div");
+  projectHeading.className = "admin-proj-heading";
+  projectHeading.textContent = "Projekt-Freigaben für User:";
+  projectBox.appendChild(projectHeading);
+
+  const projectGrid = document.createElement("div");
+  projectGrid.className = "admin-projects";
+
+  if (currentProjects.length === 0) {
+    const none = document.createElement("span");
+    none.className = "admin-proj-none";
+    none.textContent = "Keine Projekte vorhanden.";
+    projectGrid.appendChild(none);
+  }
+
+  for (const project of currentProjects) {
+    const label = document.createElement("label");
+    label.className = "admin-proj-check";
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.name = "projectIds";
+    cb.value = project.id;
+
+    const span = document.createElement("span");
+    span.textContent = project.title;
+
+    label.appendChild(cb);
+    label.appendChild(span);
+    projectGrid.appendChild(label);
+  }
+
+  projectBox.appendChild(projectGrid);
+  createCard.appendChild(projectBox);
+
+  const createMessage = document.createElement("p");
+  createMessage.className = "auth-message";
+  createMessage.hidden = true;
+  createCard.appendChild(createMessage);
+
+  const roleSelect = createCard.querySelector('select[name="role"]');
+  roleSelect.onchange = () => {
+    projectBox.hidden = roleSelect.value === "admin";
+  };
+
+  createCard.onsubmit = async (e) => {
+    e.preventDefault();
+    createMessage.hidden = true;
+
+    const data = Object.fromEntries(new FormData(createCard));
+    const projectIds = [...createCard.querySelectorAll('input[name="projectIds"]:checked')].map((cb) =>
+      Number(cb.value)
+    );
+
+    const createRes = await fetch("/api/admin/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: data.name,
+        email: data.email,
+        password: data.password,
+        role: data.role,
+        projectIds
+      })
+    });
+
+    const body = await createRes.json().catch(() => ({}));
+
+    if (!createRes.ok) {
+      createMessage.textContent = body.error || "User konnte nicht angelegt werden.";
+      createMessage.className = "auth-message is-error";
+      createMessage.hidden = false;
+      return;
+    }
+
+    createCard.reset();
+    projectBox.hidden = false;
+    render();
+  };
+
+  viewEl.appendChild(createCard);
 
   const list = document.createElement("div");
   list.className = "admin-list";
