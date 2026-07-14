@@ -12,6 +12,13 @@ try {
   nodemailer = null;
 }
 
+let archiver = null;
+try {
+  archiver = require("archiver");
+} catch {
+  archiver = null;
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 const APP_URL = process.env.APP_URL || `http://localhost:${PORT}`;
@@ -105,6 +112,15 @@ db.exec(`
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     created_by TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_id INTEGER NOT NULL,
+    user_id INTEGER,
+    user_name TEXT NOT NULL,
+    body TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // Defensive Migration: neue Spalten nur ergänzen, wenn sie fehlen.
@@ -127,6 +143,10 @@ const projectColumns = db.prepare("PRAGMA table_info(projects)").all().map((c) =
 
 if (!projectColumns.includes("image")) {
   db.exec("ALTER TABLE projects ADD COLUMN image TEXT");
+}
+
+if (!projectColumns.includes("share_token")) {
+  db.exec("ALTER TABLE projects ADD COLUMN share_token TEXT");
 }
 
 // Migration: playlists von "eine pro Projekt" (UNIQUE project_id) auf mehrere benannte pro Projekt.
@@ -261,6 +281,34 @@ function requireAuth(req, res, next) {
 function requireAdmin(req, res, next) {
   if (req.user.role !== "admin") return res.status(403).json({ error: "Nur für Admins" });
   next();
+}
+
+/* ---------- Rollenmodell ----------
+   admin      – darf alles
+   partner    – wie User, darf zusätzlich Projekte anlegen und Dateien löschen
+   user       – registrierter User: ansehen, hochladen, kommentieren, herunterladen
+   spectator  – nur ansehen + kommentieren (kein Upload, kein Löschen)              */
+const ROLES = ["admin", "partner", "user", "spectator"];
+
+function normalizeRole(role) {
+  return ROLES.includes(role) ? role : "user";
+}
+
+function canUpload(user) {
+  return user.role !== "spectator";
+}
+
+function canDeleteFiles(user) {
+  return user.role === "admin" || user.role === "partner";
+}
+
+function canCreateProject(user) {
+  return user.role === "admin" || user.role === "partner";
+}
+
+// Alle angemeldeten Rollen dürfen kommentieren (auch Spectator).
+function canComment(user) {
+  return Boolean(user);
 }
 
 function canAccessProject(user, projectId) {
@@ -584,9 +632,22 @@ app.patch("/api/projects/:projectId", requireAuth, requireAdmin, (req, res) => {
   res.json(db.prepare("SELECT * FROM projects WHERE id = ?").get(projectId));
 });
 
-app.post("/api/projects", requireAuth, requireAdmin, (req, res) => {
+app.post("/api/projects", requireAuth, (req, res) => {
+  if (!canCreateProject(req.user)) {
+    return res.status(403).json({ error: "Keine Berechtigung, Projekte anzulegen" });
+  }
+
   const title = req.body.title || "Neues Projekt";
   const result = db.prepare("INSERT INTO projects (title) VALUES (?)").run(title);
+
+  // Partner, die ein Projekt anlegen, werden direkt Mitglied (Admins sehen ohnehin alles).
+  if (req.user.role !== "admin") {
+    db.prepare("INSERT OR IGNORE INTO project_members (user_id, project_id) VALUES (?, ?)").run(
+      req.user.id,
+      result.lastInsertRowid
+    );
+  }
+
   const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(result.lastInsertRowid);
   res.json(project);
 });
@@ -657,11 +718,121 @@ app.post(
   }
 );
 
+/* ---------- Freigabe-Links (Lesezugriff ohne Login per Token) ---------- */
+
+function canManageShare(user) {
+  return user.role === "admin" || user.role === "partner";
+}
+
+function shareInfo(req, project) {
+  const base = `${req.protocol}://${req.get("host")}`;
+  return {
+    token: project.share_token || null,
+    url: project.share_token ? `${base}/s/${project.share_token}` : null
+  };
+}
+
+app.get("/api/projects/:projectId/share", requireAuth, requireProjectAccess, (req, res) => {
+  const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(Number(req.params.projectId));
+  if (!project) return res.status(404).json({ error: "Projekt nicht gefunden" });
+  res.json(shareInfo(req, project));
+});
+
+app.post("/api/projects/:projectId/share", requireAuth, requireProjectAccess, (req, res) => {
+  if (!canManageShare(req.user)) {
+    return res.status(403).json({ error: "Keine Berechtigung für Freigabe-Links" });
+  }
+
+  const projectId = Number(req.params.projectId);
+  const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(projectId);
+  if (!project) return res.status(404).json({ error: "Projekt nicht gefunden" });
+
+  let token = project.share_token;
+  if (!token) {
+    token = crypto.randomBytes(24).toString("hex");
+    db.prepare("UPDATE projects SET share_token = ? WHERE id = ?").run(token, projectId);
+    project.share_token = token;
+  }
+
+  res.json(shareInfo(req, project));
+});
+
+app.delete("/api/projects/:projectId/share", requireAuth, requireProjectAccess, (req, res) => {
+  if (!canManageShare(req.user)) {
+    return res.status(403).json({ error: "Keine Berechtigung für Freigabe-Links" });
+  }
+
+  db.prepare("UPDATE projects SET share_token = NULL WHERE id = ?").run(Number(req.params.projectId));
+  res.json({ ok: true });
+});
+
+/* ---------- Öffentlicher Freigabe-Zugriff (kein Login, nur Lesen) ---------- */
+
+function projectByShareToken(token) {
+  if (!token || typeof token !== "string" || token.length < 16) return null;
+  return db.prepare("SELECT * FROM projects WHERE share_token = ?").get(token);
+}
+
+// Statische Freigabe-Seite ausliefern.
+app.get("/s/:token", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "share.html"));
+});
+
+// Metadaten + Dateiliste eines freigegebenen Projekts (nur Uploads-Bereich, ansehen).
+app.get("/api/share/:token", (req, res) => {
+  const project = projectByShareToken(req.params.token);
+  if (!project) return res.status(404).json({ error: "Freigabe nicht gefunden" });
+
+  const files = db
+    .prepare("SELECT id, original_name, mime_type, size, category, created_at FROM files WHERE project_id = ? ORDER BY created_at DESC")
+    .all(project.id)
+    .map((f) => ({
+      id: f.id,
+      original_name: f.original_name,
+      mime_type: f.mime_type,
+      size: f.size,
+      category: f.category,
+      created_at: f.created_at,
+      url: `/api/share/${req.params.token}/file/${f.id}`
+    }));
+
+  res.json({ title: project.title, image: project.image || null, files });
+});
+
+// Auslieferung einer Datei über den Freigabe-Token (inline, nur wenn zum Projekt gehörig).
+app.get("/api/share/:token/file/:fileId", (req, res) => {
+  const project = projectByShareToken(req.params.token);
+  if (!project) return res.status(404).json({ error: "Freigabe nicht gefunden" });
+
+  const file = db
+    .prepare("SELECT * FROM files WHERE id = ? AND project_id = ?")
+    .get(Number(req.params.fileId), project.id);
+
+  if (!file || !file.path || !file.path.startsWith("/storage/")) {
+    return res.status(404).json({ error: "Datei fehlt" });
+  }
+
+  const filePath = path.resolve(path.join(__dirname, file.path.slice(1)));
+  if (!filePath.startsWith(storageDir) || !fs.existsSync(filePath)) {
+    return res.status(404).json({ error: "Datei fehlt" });
+  }
+
+  res.sendFile(filePath, {
+    headers: {
+      "Content-Type": file.mime_type || "application/octet-stream",
+      "Content-Disposition": `inline; filename="${encodeURIComponent(file.original_name)}"`
+    }
+  });
+});
+
 /* ---------- Dateien ---------- */
 
 app.get("/api/projects/:projectId/files", requireAuth, requireProjectAccess, (req, res) => {
   const files = db
-    .prepare("SELECT * FROM files WHERE project_id = ? ORDER BY created_at DESC")
+    .prepare(
+      `SELECT f.*, (SELECT COUNT(*) FROM comments c WHERE c.file_id = f.id) AS comment_count
+       FROM files f WHERE f.project_id = ? ORDER BY f.created_at DESC`
+    )
     .all(req.params.projectId);
 
   res.json(files);
@@ -671,6 +842,12 @@ app.post(
   "/api/projects/:projectId/upload",
   requireAuth,
   requireProjectAccess,
+  (req, res, next) => {
+    if (!canUpload(req.user)) {
+      return res.status(403).json({ error: "Zuschauer dürfen keine Dateien hochladen" });
+    }
+    next();
+  },
   upload.array("files"),
   (req, res) => {
     const projectId = Number(req.params.projectId);
@@ -762,6 +939,10 @@ app.post("/api/files/:fileId/move-to-show", requireAuth, (req, res) => {
   const file = getFileForUser(req, res);
   if (!file) return;
 
+  if (!canUpload(req.user)) {
+    return res.status(403).json({ error: "Zuschauer dürfen die Show nicht ändern" });
+  }
+
   if (!SHOW_CATEGORIES.includes(file.category)) {
     return res.status(400).json({ error: "Nur Video, Audio und Bilder können in die Show" });
   }
@@ -774,16 +955,24 @@ app.post("/api/files/:fileId/remove-from-show", requireAuth, (req, res) => {
   const file = getFileForUser(req, res);
   if (!file) return;
 
+  if (!canUpload(req.user)) {
+    return res.status(403).json({ error: "Zuschauer dürfen die Show nicht ändern" });
+  }
+
   db.prepare("UPDATE files SET area = 'uploads', status = 'new' WHERE id = ?").run(file.id);
   res.json(db.prepare("SELECT * FROM files WHERE id = ?").get(file.id));
 });
 
-app.delete("/api/files/:fileId", requireAuth, requireAdmin, (req, res) => {
+app.delete("/api/files/:fileId", requireAuth, (req, res) => {
   const fileId = Number(req.params.fileId);
   const file = db.prepare("SELECT * FROM files WHERE id = ?").get(fileId);
 
   if (!file) {
     return res.status(404).json({ error: "Datei nicht gefunden" });
+  }
+
+  if (!canDeleteFiles(req.user) || !canAccessProject(req.user, file.project_id)) {
+    return res.status(403).json({ error: "Keine Berechtigung, diese Datei zu löschen" });
   }
 
   if (file.path && file.path.startsWith("/storage/")) {
@@ -793,8 +982,104 @@ app.delete("/api/files/:fileId", requireAuth, requireAdmin, (req, res) => {
     }
   }
 
+  db.prepare("DELETE FROM comments WHERE file_id = ?").run(fileId);
   db.prepare("DELETE FROM files WHERE id = ?").run(fileId);
   res.json({ ok: true });
+});
+
+/* ---------- Kommentare ---------- */
+
+app.get("/api/files/:fileId/comments", requireAuth, (req, res) => {
+  const file = getFileForUser(req, res);
+  if (!file) return;
+
+  const comments = db
+    .prepare("SELECT * FROM comments WHERE file_id = ? ORDER BY created_at ASC")
+    .all(file.id);
+
+  res.json(comments);
+});
+
+app.post("/api/files/:fileId/comments", requireAuth, (req, res) => {
+  const file = getFileForUser(req, res);
+  if (!file) return;
+
+  if (!canComment(req.user)) {
+    return res.status(403).json({ error: "Keine Berechtigung zum Kommentieren" });
+  }
+
+  const body = (req.body.body || "").trim();
+  if (!body) {
+    return res.status(400).json({ error: "Kommentar darf nicht leer sein" });
+  }
+  if (body.length > 2000) {
+    return res.status(400).json({ error: "Kommentar ist zu lang (max. 2000 Zeichen)" });
+  }
+
+  const result = db
+    .prepare("INSERT INTO comments (file_id, user_id, user_name, body) VALUES (?, ?, ?, ?)")
+    .run(file.id, req.user.id, req.user.name, body);
+
+  res.status(201).json(db.prepare("SELECT * FROM comments WHERE id = ?").get(result.lastInsertRowid));
+});
+
+app.delete("/api/comments/:commentId", requireAuth, (req, res) => {
+  const comment = db.prepare("SELECT * FROM comments WHERE id = ?").get(Number(req.params.commentId));
+
+  if (!comment) {
+    return res.status(404).json({ error: "Kommentar nicht gefunden" });
+  }
+
+  const file = db.prepare("SELECT * FROM files WHERE id = ?").get(comment.file_id);
+  if (!file || !canAccessProject(req.user, file.project_id)) {
+    return res.status(403).json({ error: "Kein Zugriff" });
+  }
+
+  // Autor darf den eigenen Kommentar löschen, Admin/Partner jeden.
+  const isAuthor = comment.user_id === req.user.id;
+  if (!isAuthor && req.user.role !== "admin" && req.user.role !== "partner") {
+    return res.status(403).json({ error: "Nur eigene Kommentare löschbar" });
+  }
+
+  db.prepare("DELETE FROM comments WHERE id = ?").run(comment.id);
+  res.json({ ok: true });
+});
+
+// Alle Dateien eines Projekts als ZIP herunterladen.
+app.get("/api/projects/:projectId/download-all", requireAuth, requireProjectAccess, (req, res) => {
+  if (!archiver) return res.status(501).json({ error: "ZIP-Download nicht verfügbar (archiver fehlt)" });
+
+  const projectId = Number(req.params.projectId);
+  const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(projectId);
+  if (!project) return res.status(404).json({ error: "Projekt nicht gefunden" });
+
+  const files = db
+    .prepare("SELECT * FROM files WHERE project_id = ? ORDER BY original_name COLLATE NOCASE")
+    .all(projectId);
+
+  const cleanZip = String(project.title || "projekt").normalize("NFKD").replace(/[^\w.-]+/g, "_").replace(/^_+|_+$/g, "") || "projekt";
+  res.setHeader("Content-Type", "application/zip");
+  res.setHeader("Content-Disposition", `attachment; filename="${cleanZip}.zip"`);
+
+  const archive = archiver("zip", { zlib: { level: 5 } });
+  archive.on("error", () => { try { res.status(500).end(); } catch (e) {} });
+  archive.pipe(res);
+
+  const used = {};
+  for (const f of files) {
+    if (!f.path || !f.path.startsWith("/storage/")) continue;
+    const fp = path.resolve(path.join(__dirname, f.path.slice(1)));
+    if (!fp.startsWith(storageDir) || !fs.existsSync(fp)) continue;
+    let name = f.original_name || path.basename(fp);
+    if (used[name]) {
+      const ext = path.extname(name);
+      name = name.slice(0, name.length - ext.length) + "_" + used[name]++ + ext;
+    } else {
+      used[name] = 1;
+    }
+    archive.file(fp, { name });
+  }
+  archive.finalize();
 });
 
 /* ---------- Player / Playlists ---------- */
@@ -1041,7 +1326,7 @@ app.post("/api/admin/users", requireAuth, requireAdmin, (req, res) => {
   const name = (req.body.name || "").trim();
   const email = (req.body.email || "").trim().toLowerCase();
   const password = req.body.password || "";
-  const role = req.body.role === "admin" ? "admin" : "user";
+  const role = normalizeRole(req.body.role);
   const projectIds = Array.isArray(req.body.projectIds)
     ? req.body.projectIds.map(Number).filter((id) => Number.isInteger(id) && id > 0)
     : [];
@@ -1087,6 +1372,56 @@ app.post("/api/admin/users", requireAuth, requireAdmin, (req, res) => {
     ...publicUser(user),
     projects: role === "admin" ? [] : validProjectIds
   });
+});
+
+app.patch("/api/admin/users/:userId", requireAuth, requireAdmin, (req, res) => {
+  const userId = Number(req.params.userId);
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
+
+  if (!user) {
+    return res.status(404).json({ error: "User nicht gefunden" });
+  }
+
+  const name = (req.body.name || "").trim();
+  const email = (req.body.email || "").trim().toLowerCase();
+  const role = normalizeRole(req.body.role);
+  const password = req.body.password || "";
+
+  if (!name || !email || !email.includes("@")) {
+    return res.status(400).json({ error: "Bitte Name und gültige E-Mail angeben" });
+  }
+  if (password && password.length < 8) {
+    return res.status(400).json({ error: "Passwort muss mindestens 8 Zeichen haben" });
+  }
+
+  const emailOwner = db.prepare("SELECT id FROM users WHERE email = ?").get(email);
+  if (emailOwner && emailOwner.id !== userId) {
+    return res.status(409).json({ error: "Diese E-Mail ist bereits vergeben" });
+  }
+
+  // Der letzte Admin darf sich nicht selbst degradieren, sonst gibt es keinen Admin mehr.
+  if (user.role === "admin" && role !== "admin") {
+    const adminCount = db.prepare("SELECT COUNT(*) AS c FROM users WHERE role = 'admin'").get().c;
+    if (adminCount <= 1) {
+      return res.status(400).json({ error: "Der letzte Admin kann nicht herabgestuft werden" });
+    }
+  }
+
+  db.prepare("UPDATE users SET name = ?, email = ?, role = ? WHERE id = ?").run(name, email, role, userId);
+
+  if (password) {
+    db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(hashPassword(password), userId);
+    // Nach Passwortwechsel alle Sessions dieses Users beenden.
+    db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
+  }
+
+  const updated = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
+  const projects = db
+    .prepare("SELECT project_id FROM project_members WHERE user_id = ?")
+    .all(userId)
+    .map((r) => r.project_id);
+
+  res.json({ ...publicUser(updated), projects });
 });
 
 app.post("/api/admin/users/:userId/verify", requireAuth, requireAdmin, (req, res) => {
@@ -1156,6 +1491,125 @@ app.delete("/api/admin/users/:userId", requireAuth, requireAdmin, (req, res) => 
   res.json({ ok: true });
 });
 
+/* ---------- SHOW-Feed (toolübergreifend: Regieplan liest SHOW-Dateien) ---------- */
+// Cross-Domain-Zugriff nur über geheimen Key (Feed/Projektliste) bzw. HMAC-Token pro
+// Datei (Auslieferung). Bestehende Login-/Cookie-Logik bleibt unangetastet.
+const SHOW_FEED_KEY = process.env.SHOW_FEED_KEY || "";
+
+function showConfigured() {
+  return Boolean(SHOW_FEED_KEY);
+}
+
+function timingEqual(a, b) {
+  const bufA = Buffer.from(String(a || ""));
+  const bufB = Buffer.from(String(b || ""));
+  return bufA.length === bufB.length && crypto.timingSafeEqual(bufA, bufB);
+}
+
+function validShowKey(key) {
+  return showConfigured() && timingEqual(key, SHOW_FEED_KEY);
+}
+
+// Pro Datei ein abgeleiteter Token – so landet der Master-Key nie in gespeicherten Plänen.
+function showToken(id) {
+  return crypto.createHmac("sha256", SHOW_FEED_KEY).update("show:" + id).digest("hex").slice(0, 32);
+}
+
+function validShowToken(id, token) {
+  return showConfigured() && timingEqual(token, showToken(id));
+}
+
+function showCors(res) {
+  // Zugriff ist bereits durch Key/Token geschützt, daher ist ein offener Origin unkritisch
+  // und erspart Origin-Matching (lokales Testen, regie.derhacker.com).
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+}
+
+app.options("/api/show/*", (req, res) => {
+  showCors(res);
+  res.sendStatus(204);
+});
+
+// Projekte, die überhaupt SHOW-Medien haben (für das Dropdown im Regieplan).
+app.get("/api/show/projects", (req, res) => {
+  showCors(res);
+  if (!showConfigured()) return res.status(503).json({ error: "SHOW-Feed nicht konfiguriert" });
+  if (!validShowKey(req.query.key)) return res.status(401).json({ error: "Ungültiger Key" });
+
+  const rows = db
+    .prepare(
+      `SELECT p.id AS id, p.title AS title, COUNT(f.id) AS showCount
+       FROM projects p
+       JOIN files f ON f.project_id = p.id AND f.area = 'show' AND f.category IN ('video','audio','images')
+       GROUP BY p.id, p.title
+       ORDER BY p.title COLLATE NOCASE`
+    )
+    .all();
+
+  res.json({ projects: rows });
+});
+
+// SHOW-Dateien eines Projekts als fertige Clips (gleiche Form wie die Player-Playlist).
+app.get("/api/show/feed", (req, res) => {
+  showCors(res);
+  if (!showConfigured()) return res.status(503).json({ error: "SHOW-Feed nicht konfiguriert" });
+  if (!validShowKey(req.query.key)) return res.status(401).json({ error: "Ungültiger Key" });
+
+  const projectId = Number(req.query.project);
+  if (!projectId) return res.status(400).json({ error: "Kein Projekt angegeben" });
+
+  const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(projectId);
+  if (!project) return res.status(404).json({ error: "Projekt nicht gefunden" });
+
+  const typeByCategory = { video: "video", audio: "audio", images: "image" };
+
+  const clips = db
+    .prepare("SELECT * FROM files WHERE project_id = ? AND area = 'show' ORDER BY created_at ASC")
+    .all(projectId)
+    .filter((f) => typeByCategory[f.category])
+    .map((f) => ({
+      id: f.id,
+      type: typeByCategory[f.category],
+      name: f.original_name,
+      mime: f.mime_type || "",
+      relativePath: f.path,
+      isLoop: false,
+      thumbnail: "",
+      url: `${APP_URL}/api/show/file/${f.id}?t=${showToken(f.id)}`
+    }));
+
+  res.json({ projectId: project.id, projectTitle: project.title, clips });
+});
+
+// Auslieferung der eigentlichen Datei – nur mit gültigem, pro-Datei-Token (inline, Range-fähig).
+app.get("/api/show/file/:id", (req, res) => {
+  showCors(res);
+  if (!showConfigured()) return res.status(503).json({ error: "SHOW-Feed nicht konfiguriert" });
+
+  const id = Number(req.params.id);
+  if (!validShowToken(id, req.query.t)) return res.status(403).json({ error: "Ungültiger Token" });
+
+  const file = db.prepare("SELECT * FROM files WHERE id = ? AND area = 'show'").get(id);
+  if (!file) return res.status(404).json({ error: "Datei nicht in der Show" });
+  if (!file.path || !file.path.startsWith("/storage/")) return res.status(404).json({ error: "Datei fehlt" });
+
+  const filePath = path.resolve(path.join(__dirname, file.path.slice(1)));
+  if (!filePath.startsWith(storageDir) || !fs.existsSync(filePath)) {
+    return res.status(404).json({ error: "Datei fehlt" });
+  }
+
+  res.sendFile(filePath, {
+    headers: {
+      "Content-Type": file.mime_type || "application/octet-stream",
+      "Content-Disposition": `inline; filename="${encodeURIComponent(file.original_name)}"`,
+      "Cache-Control": "public, max-age=300"
+    }
+  });
+});
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Projekttool läuft auf Port ${PORT}${mailEnabled ? " (Mailversand aktiv)" : " (Mailversand deaktiviert – Admin bestätigt User manuell)"}`);
+  console.log(`SHOW-Feed: ${showConfigured() ? "aktiv" : "deaktiviert (SHOW_FEED_KEY fehlt)"}`);
 });

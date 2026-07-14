@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Freigabe · Media Hub</title>
+  <style>
+    :root {
+      --bg: #0d0d0f;
+      --bg-raise: #161619;
+      --bg-card: #1b1b1f;
+      --border: #2a2a30;
+      --text: #ececec;
+      --text-dim: #9a9aa3;
+      --lime: #ccff00;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-raise);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+    header .avatar {
+      width: 48px; height: 48px; border-radius: 12px;
+      background: var(--bg-card); border: 1px solid var(--border);
+      overflow: hidden; flex: 0 0 48px; object-fit: cover;
+    }
+    header h1 { font-size: 18px; margin: 0; }
+    header .sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+    .badge-ro {
+      margin-left: auto; font-size: 11px; letter-spacing: .05em; text-transform: uppercase;
+      color: var(--lime); border: 1px solid var(--lime); border-radius: 999px; padding: 3px 10px;
+    }
+    main { padding: 24px; max-width: 1200px; margin: 0 auto; }
+    .grid {
+      display: grid; gap: 16px;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    }
+    .card {
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px;
+      overflow: hidden; display: flex; flex-direction: column;
+    }
+    .thumb {
+      aspect-ratio: 16 / 10; background: #050603; display: grid; place-items: center;
+      overflow: hidden; cursor: pointer;
+    }
+    .thumb img, .thumb video { width: 100%; height: 100%; object-fit: cover; }
+    .thumb .ext { font-size: 13px; color: var(--text-dim); font-weight: 700; letter-spacing: .05em; }
+    .body { padding: 10px 12px; }
+    .name { font-size: 13px; word-break: break-word; }
+    .meta { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+    .empty, .error { color: var(--text-dim); text-align: center; padding: 60px 20px; }
+    .error { color: #ff8f8f; }
+    /* Lightbox */
+    .lb { position: fixed; inset: 0; background: rgba(0,0,0,.9); display: none; z-index: 20;
+      align-items: center; justify-content: center; padding: 24px; }
+    .lb.open { display: flex; }
+    .lb img, .lb video { max-width: 92vw; max-height: 88vh; }
+    .lb-close { position: absolute; top: 16px; right: 20px; font-size: 30px; color: #fff;
+      cursor: pointer; background: none; border: none; line-height: 1; }
+  </style>
+</head>
+<body>
+  <header>
+    <img class="avatar" id="avatar" alt="" hidden />
+    <div>
+      <h1 id="title">Freigabe wird geladen …</h1>
+      <div class="sub" id="sub"></div>
+    </div>
+    <span class="badge-ro">Nur Lesen</span>
+  </header>
+
+  <main>
+    <div id="content"></div>
+  </main>
+
+  <div class="lb" id="lb">
+    <button class="lb-close" id="lbClose" type="button">&times;</button>
+    <div id="lbBody"></div>
+  </div>
+
+  <script>
+    const token = location.pathname.split("/").filter(Boolean).pop();
+    const titleEl = document.getElementById("title");
+    const subEl = document.getElementById("sub");
+    const contentEl = document.getElementById("content");
+    const avatarEl = document.getElementById("avatar");
+    const lb = document.getElementById("lb");
+    const lbBody = document.getElementById("lbBody");
+
+    function fmtBytes(b) {
+      if (!b) return "0 B";
+      const u = ["B", "KB", "MB", "GB", "TB"];
+      const i = Math.floor(Math.log(b) / Math.log(1024));
+      return (b / Math.pow(1024, i)).toFixed(i ? 1 : 0) + " " + u[i];
+    }
+    function fmtDate(s) {
+      const d = new Date((s || "").replace(" ", "T") + "Z");
+      return isNaN(d) ? "" : d.toLocaleDateString("de-DE");
+    }
+
+    function openLightbox(file) {
+      lbBody.innerHTML = "";
+      const mime = file.mime_type || "";
+      let el;
+      if (mime.startsWith("image/")) { el = document.createElement("img"); el.src = file.url; }
+      else if (mime.startsWith("video/")) { el = document.createElement("video"); el.src = file.url; el.controls = true; el.autoplay = true; }
+      else if (mime.startsWith("audio/")) { el = document.createElement("audio"); el.src = file.url; el.controls = true; el.autoplay = true; }
+      else { window.open(file.url, "_blank"); return; }
+      lbBody.appendChild(el);
+      lb.classList.add("open");
+    }
+    document.getElementById("lbClose").onclick = () => { lb.classList.remove("open"); lbBody.innerHTML = ""; };
+    lb.onclick = (e) => { if (e.target === lb) { lb.classList.remove("open"); lbBody.innerHTML = ""; } };
+
+    function buildCard(file) {
+      const card = document.createElement("div");
+      card.className = "card";
+
+      const thumb = document.createElement("div");
+      thumb.className = "thumb";
+      const mime = file.mime_type || "";
+      if (mime.startsWith("image/")) {
+        const img = document.createElement("img"); img.src = file.url; img.loading = "lazy"; thumb.appendChild(img);
+      } else if (mime.startsWith("video/")) {
+        const v = document.createElement("video"); v.src = file.url; v.muted = true; v.preload = "metadata"; thumb.appendChild(v);
+      } else {
+        const ext = document.createElement("span"); ext.className = "ext";
+        ext.textContent = (file.original_name.split(".").pop() || "Datei").toUpperCase();
+        thumb.appendChild(ext);
+      }
+      thumb.onclick = () => openLightbox(file);
+      card.appendChild(thumb);
+
+      const body = document.createElement("div");
+      body.className = "body";
+      const name = document.createElement("div");
+      name.className = "name"; name.textContent = file.original_name;
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = fmtBytes(file.size) + " · " + fmtDate(file.created_at);
+      body.appendChild(name); body.appendChild(meta);
+      card.appendChild(body);
+      return card;
+    }
+
+    async function load() {
+      let res;
+      try { res = await fetch("/api/share/" + encodeURIComponent(token)); }
+      catch { titleEl.textContent = "Fehler"; contentEl.innerHTML = '<p class="error">Verbindung fehlgeschlagen.</p>'; return; }
+
+      if (!res.ok) {
+        titleEl.textContent = "Freigabe nicht gefunden";
+        subEl.textContent = "";
+        contentEl.innerHTML = '<p class="error">Dieser Freigabe-Link ist ungültig oder wurde deaktiviert.</p>';
+        return;
+      }
+
+      const data = await res.json();
+      document.title = data.title + " · Freigabe";
+      titleEl.textContent = data.title;
+      subEl.textContent = data.files.length + " Datei" + (data.files.length === 1 ? "" : "en");
+      if (data.image) { avatarEl.src = data.image; avatarEl.hidden = false; }
+
+      if (data.files.length === 0) {
+        contentEl.innerHTML = '<p class="empty">Noch keine Dateien in diesem Projekt.</p>';
+        return;
+      }
+
+      const grid = document.createElement("div");
+      grid.className = "grid";
+      for (const file of data.files) grid.appendChild(buildCard(file));
+      contentEl.appendChild(grid);
+    }
+
+    load();
+  </script>
+</body>
+</html>

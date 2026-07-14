@@ -78,7 +78,8 @@ const ICON_PATHS = {
   grid: "M21 3C21.5523 3 22 3.44772 22 4V20C22 20.5523 21.5523 21 21 21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H21ZM11 13H4V19H11V13ZM20 13H13V19H20V13ZM11 5H4V11H11V5ZM20 5H13V11H20V5Z",
   user: "M4 22C4 17.5817 7.58172 14 12 14C16.4183 14 20 17.5817 20 22H18C18 18.6863 15.3137 16 12 16C8.68629 16 6 18.6863 6 22H4ZM12 13C8.685 13 6 10.315 6 7C6 3.685 8.685 1 12 1C15.315 1 18 3.685 18 7C18 10.315 15.315 13 12 13ZM12 11C14.21 11 16 9.21 16 7C16 4.79 14.21 3 12 3C9.79 3 8 4.79 8 7C8 9.21 9.79 11 12 11Z",
   phone: "M9.36556 10.6821C10.302 12.3288 11.6712 13.698 13.3179 14.6344L14.2024 13.3961C14.4965 12.9845 15.0516 12.8573 15.4956 13.0998C16.9024 13.8683 18.4571 14.3353 20.0789 14.4637C20.599 14.5049 21 14.9389 21 15.4606V19.9234C21 20.4361 20.6122 20.8657 20.1022 20.9181C19.5723 20.9726 19.0377 21 18.5 21C9.93959 21 3 14.0604 3 5.5C3 4.96227 3.02742 4.42771 3.08189 3.89776C3.1343 3.38775 3.56394 3 4.07665 3H8.53942C9.0611 3 9.49513 3.40104 9.5363 3.92109C9.66467 5.54288 10.1317 7.09764 10.9002 8.50444C11.1427 8.9484 11.0155 9.50354 10.6039 9.79757L9.36556 10.6821ZM6.84425 10.0252L8.7442 8.66809C8.20547 7.50514 7.83628 6.27183 7.64727 5H5.00907C5.00303 5.16632 5 5.333 5 5.5C5 12.9558 11.0442 19 18.5 19C18.667 19 18.8337 18.997 19 18.9909V16.3527C17.7282 16.1637 16.4949 15.7945 15.3319 15.2558L13.9748 17.1558C13.4258 16.9425 12.8956 16.6915 12.3874 16.4061L12.3293 16.373C10.3697 15.2587 8.74134 13.6303 7.627 11.6707L7.59394 11.6126C7.30849 11.1044 7.05754 10.5742 6.84425 10.0252Z",
-  add: "M11 11V5H13V11H19V13H13V19H11V13H5V11H11Z"
+  add: "M11 11V5H13V11H19V13H13V19H11V13H5V11H11Z",
+  chat: "M6.45455 19L2 22.5V4C2 3.44772 2.44772 3 3 3H21C21.5523 3 22 3.44772 22 4V18C22 18.5523 21.5523 19 21 19H6.45455ZM5.76282 17H20V5H4V18.3851L5.76282 17Z"
 };
 
 function icon(name, cls) {
@@ -111,6 +112,22 @@ const AREAS = [
 
 function isAdmin() {
   return currentUser && currentUser.role === "admin";
+}
+
+// admin + partner dürfen Dateien löschen, Projekte anlegen, Freigabe-Links verwalten.
+function canManage() {
+  return currentUser && (currentUser.role === "admin" || currentUser.role === "partner");
+}
+
+// Alle außer Spectator dürfen hochladen / die Show ändern.
+function canUploadFiles() {
+  return currentUser && currentUser.role !== "spectator";
+}
+
+const ROLE_LABELS = { admin: "Admin", partner: "Partner", user: "User", spectator: "Zuschauer" };
+
+function roleLabel(role) {
+  return ROLE_LABELS[role] || "User";
 }
 
 /* ---------- Auth ---------- */
@@ -285,10 +302,10 @@ async function init() {
   appShell.hidden = false;
 
   navAdmin.hidden = !isAdmin();
-  newProjectBtn.hidden = !isAdmin();
+  newProjectBtn.hidden = !canManage();
   userBox.hidden = false;
   userNameText.textContent = currentUser.name;
-  userRole.textContent = isAdmin() ? "Admin" : "User";
+  userRole.textContent = roleLabel(currentUser.role);
 
   userRenameBtn.innerHTML = icon("edit", "icon icon-sm");
   userRenameBtn.onclick = async () => {
@@ -692,6 +709,7 @@ function renderUploads() {
     return;
   }
 
+  if (canUploadFiles()) {
   const dropzone = document.createElement("div");
   dropzone.className = "dropzone";
   dropzone.innerHTML = `
@@ -732,6 +750,7 @@ function renderUploads() {
   `;
   viewEl.appendChild(progress);
   updateUploadProgress();
+  }
 
   const tiles = document.createElement("div");
   tiles.className = "category-grid";
@@ -1263,7 +1282,9 @@ async function renderAdmin() {
       </label>
       <label>Rolle
         <select name="role">
-          <option value="user">User</option>
+          <option value="user">User (registriert)</option>
+          <option value="partner">Partner (löschen + Projekte anlegen)</option>
+          <option value="spectator">Zuschauer (nur ansehen)</option>
           <option value="admin">Admin</option>
         </select>
       </label>
@@ -1379,8 +1400,8 @@ async function renderAdmin() {
     badges.className = "admin-badges";
 
     const roleBadge = document.createElement("span");
-    roleBadge.className = "badge " + (user.role === "admin" ? "badge-lime" : "badge-muted");
-    roleBadge.textContent = user.role === "admin" ? "Admin" : "User";
+    roleBadge.className = "badge " + (user.role === "admin" || user.role === "partner" ? "badge-lime" : "badge-muted");
+    roleBadge.textContent = roleLabel(user.role);
     badges.appendChild(roleBadge);
 
     const verifiedBadge = document.createElement("span");
@@ -1394,6 +1415,12 @@ async function renderAdmin() {
 
     const actions = document.createElement("div");
     actions.className = "admin-actions";
+
+    const editBtn = document.createElement("button");
+    editBtn.className = "btn-small";
+    editBtn.innerHTML = icon("edit", "icon icon-sm") + " Bearbeiten";
+    editBtn.onclick = () => toggleAdminEditForm(user, card, editBtn);
+    actions.appendChild(editBtn);
 
     if (!user.email_verified) {
       const verifyBtn = document.createElement("button");
@@ -1479,6 +1506,75 @@ async function renderAdmin() {
   viewEl.appendChild(list);
 }
 
+// Inline-Editieren eines Users (Name, E-Mail, Rolle, optional neues Passwort).
+function toggleAdminEditForm(user, card, triggerBtn) {
+  const existing = card.querySelector(".admin-edit-form");
+  if (existing) {
+    existing.remove();
+    return;
+  }
+
+  const form = document.createElement("form");
+  form.className = "admin-edit-form";
+  form.innerHTML = `
+    <div class="admin-create-grid">
+      <label>Name
+        <input name="name" type="text" value="${escapeHtml(user.name)}" required />
+      </label>
+      <label>E-Mail
+        <input name="email" type="email" value="${escapeHtml(user.email)}" required />
+      </label>
+      <label>Rolle
+        <select name="role">
+          <option value="user">User (registriert)</option>
+          <option value="partner">Partner (löschen + Projekte anlegen)</option>
+          <option value="spectator">Zuschauer (nur ansehen)</option>
+          <option value="admin">Admin</option>
+        </select>
+      </label>
+      <label>Neues Passwort (optional)
+        <input name="password" type="password" minlength="8" autocomplete="new-password" placeholder="leer lassen = unverändert" />
+      </label>
+    </div>
+    <div class="admin-edit-actions">
+      <button class="btn-small" type="submit">Speichern</button>
+      <button class="btn-small btn-ghost" type="button" data-cancel>Abbrechen</button>
+    </div>
+    <p class="auth-message" hidden></p>
+  `;
+
+  form.querySelector('select[name="role"]').value = user.role;
+  form.querySelector("[data-cancel]").onclick = () => form.remove();
+
+  const message = form.querySelector(".auth-message");
+
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    message.hidden = true;
+    const data = Object.fromEntries(new FormData(form));
+    const payload = { name: data.name, email: data.email, role: data.role };
+    if (data.password) payload.password = data.password;
+
+    const res = await fetch(`/api/admin/users/${user.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const body = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      message.textContent = body.error || "Speichern fehlgeschlagen.";
+      message.className = "auth-message is-error";
+      message.hidden = false;
+      return;
+    }
+
+    render();
+  };
+
+  card.appendChild(form);
+}
+
 /* ---------- Datei-Cards ---------- */
 
 const SORT_OPTIONS = [
@@ -1553,7 +1649,52 @@ function buildViewControls(onChange) {
 
   bar.appendChild(sliderWrap);
   bar.appendChild(select);
+
+  if (canManage() && currentProjectId) {
+    const shareBtn = document.createElement("button");
+    shareBtn.type = "button";
+    shareBtn.className = "btn-small btn-ghost hb-share-btn";
+    shareBtn.innerHTML = icon("exports", "icon icon-sm") + " Freigabe-Link";
+    shareBtn.title = "Lese-Freigabe ohne Login erstellen";
+    shareBtn.onclick = () => openShareDialog(currentProjectId);
+    bar.appendChild(shareBtn);
+  }
+
   return bar;
+}
+
+async function openShareDialog(projectId) {
+  const res = await fetch(`/api/projects/${projectId}/share`);
+  if (!res.ok) return;
+  const info = await res.json();
+
+  if (info.url) {
+    const revoke = confirm(
+      `Freigabe-Link (nur Lesen, ohne Login):\n\n${info.url}\n\n` +
+        `OK = Link in die Zwischenablage kopieren · Abbrechen = Link deaktivieren.`
+    );
+    if (revoke) {
+      copyToClipboard(info.url);
+    } else {
+      if (confirm("Freigabe-Link wirklich deaktivieren? Der bestehende Link wird ungültig.")) {
+        await fetch(`/api/projects/${projectId}/share`, { method: "DELETE" });
+        alert("Freigabe deaktiviert.");
+      }
+    }
+    return;
+  }
+
+  const created = await fetch(`/api/projects/${projectId}/share`, { method: "POST" });
+  if (!created.ok) return;
+  const body = await created.json();
+  copyToClipboard(body.url);
+  prompt("Freigabe-Link erstellt (nur Lesen, ohne Login) – kopieren und weitergeben:", body.url);
+}
+
+function copyToClipboard(text) {
+  try {
+    navigator.clipboard.writeText(text);
+  } catch {}
 }
 
 function buildFileGrid(files, emptyText) {
@@ -1624,7 +1765,7 @@ function buildFileCard(file) {
   btnGroup.className = "file-actions";
 
   const category = file.category || "other";
-  if (SHOW_CATEGORIES.includes(category)) {
+  if (SHOW_CATEGORIES.includes(category) && canUploadFiles()) {
     const action = document.createElement("button");
     action.className = "btn-small btn-show";
     if (inShow) {
@@ -1638,6 +1779,14 @@ function buildFileCard(file) {
     btnGroup.appendChild(action);
   }
 
+  const commentBtn = document.createElement("button");
+  commentBtn.className = "btn-small btn-ghost btn-icon file-comment-btn";
+  commentBtn.title = "Kommentare";
+  const commentCount = file.comment_count || 0;
+  commentBtn.innerHTML = icon("chat", "icon icon-sm") + (commentCount ? ` <span class="comment-count">${commentCount}</span>` : "");
+  commentBtn.onclick = () => openPreviewModal(file, { focusComments: true });
+  btnGroup.appendChild(commentBtn);
+
   const download = document.createElement("a");
   download.className = "btn-small btn-ghost btn-icon";
   download.title = "Herunterladen";
@@ -1645,7 +1794,7 @@ function buildFileCard(file) {
   download.innerHTML = icon("exports", "icon icon-sm");
   btnGroup.appendChild(download);
 
-  if (isAdmin()) {
+  if (canManage()) {
     const del = document.createElement("button");
     del.className = "btn-small btn-danger btn-icon";
     del.title = "Datei löschen";
@@ -1714,7 +1863,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !previewModal.hidden) closePreviewModal();
 });
 
-async function openPreviewModal(file) {
+async function openPreviewModal(file, options = {}) {
   const cat = CATEGORIES.find((c) => c.key === (file.category || "other"));
   pmName.textContent = file.original_name;
   pmMeta.textContent = `${cat ? cat.label : "Other"} · ${formatBytes(file.size)} · ${formatDate(file.created_at)}`;
@@ -1777,6 +1926,110 @@ async function openPreviewModal(file) {
     `;
     pmBody.appendChild(fallback);
   }
+
+  const comments = document.createElement("div");
+  comments.className = "pm-comments";
+  pmBody.appendChild(comments);
+  renderCommentsPanel(file, comments);
+
+  if (options.focusComments) {
+    setTimeout(() => comments.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+  }
+}
+
+async function renderCommentsPanel(file, container) {
+  container.innerHTML = `<h4 class="pm-comments-head">${icon("chat", "icon icon-sm")} Kommentare</h4><p class="pm-comments-loading">Lade …</p>`;
+
+  let list = [];
+  try {
+    const res = await fetch(`/api/files/${file.id}/comments`);
+    if (res.ok) list = await res.json();
+  } catch {}
+
+  container.innerHTML = `<h4 class="pm-comments-head">${icon("chat", "icon icon-sm")} Kommentare</h4>`;
+
+  const listEl = document.createElement("div");
+  listEl.className = "comment-list";
+
+  if (list.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "pm-comments-loading";
+    empty.textContent = "Noch keine Kommentare.";
+    listEl.appendChild(empty);
+  }
+
+  for (const c of list) {
+    const item = document.createElement("div");
+    item.className = "comment-item";
+
+    const head = document.createElement("div");
+    head.className = "comment-head";
+    head.innerHTML = `<span class="comment-author">${escapeHtml(c.user_name)}</span><span class="comment-date">${formatDate(c.created_at)}</span>`;
+
+    const canDelete = currentUser && (c.user_id === currentUser.id || canManage());
+    if (canDelete) {
+      const del = document.createElement("button");
+      del.className = "btn-icon-ghost comment-del";
+      del.title = "Kommentar löschen";
+      del.innerHTML = icon("trash", "icon icon-sm");
+      del.onclick = async () => {
+        if (!confirm("Kommentar löschen?")) return;
+        const res = await fetch(`/api/comments/${c.id}`, { method: "DELETE" });
+        if (res.ok) {
+          await loadFiles();
+          renderCommentsPanel(file, container);
+        }
+      };
+      head.appendChild(del);
+    }
+
+    const bodyEl = document.createElement("p");
+    bodyEl.className = "comment-body";
+    bodyEl.textContent = c.body;
+
+    item.appendChild(head);
+    item.appendChild(bodyEl);
+    listEl.appendChild(item);
+  }
+
+  container.appendChild(listEl);
+
+  const form = document.createElement("form");
+  form.className = "comment-form";
+  const textarea = document.createElement("textarea");
+  textarea.rows = 2;
+  textarea.placeholder = "Kommentar schreiben …";
+  textarea.maxLength = 2000;
+  const submit = document.createElement("button");
+  submit.className = "btn-small";
+  submit.type = "submit";
+  submit.textContent = "Senden";
+  form.appendChild(textarea);
+  form.appendChild(submit);
+
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const body = textarea.value.trim();
+    if (!body) return;
+    submit.disabled = true;
+    const res = await fetch(`/api/files/${file.id}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body })
+    });
+    submit.disabled = false;
+    if (res.ok) {
+      textarea.value = "";
+      await loadFiles();
+      renderCommentsPanel(file, container);
+    }
+  };
+
+  container.appendChild(form);
+}
+
+function escapeHtml(s) {
+  return String(s || "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 }
 
 function createPreview(file) {
@@ -1972,3 +2225,247 @@ newProjectBtn.onclick = async () => {
 
 initPwToggles();
 init();
+
+/* ===== HB-Enhance: Dateityp-Badge (auch bei schwarzem Video-Frame) + Farbmarkierung
+   Loops = lime, Videos (mit Audio) = blau. Append-only, wrappt buildFileCard. ===== */
+(function(){
+  if (typeof buildFileCard !== "function" || window.__hbFileEnhance) return;
+  window.__hbFileEnhance = true;
+
+  var style = document.createElement("style");
+  style.textContent = [
+    ".file-card{position:relative;}",
+    ".file-card .preview{position:relative;}",
+    ".hb-type-badge{position:absolute;top:4px;left:4px;z-index:6;font-size:9px;font-weight:800;",
+    "  letter-spacing:.04em;padding:2px 6px;border-radius:5px;background:rgba(0,0,0,.72);color:#fff;",
+    "  pointer-events:none;line-height:1.25;text-transform:uppercase;box-shadow:0 1px 3px rgba(0,0,0,.4);}",
+    ".file-card.hb-mark-loop::before,.file-card.hb-mark-video::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;z-index:4;pointer-events:none;}",
+    ".file-card.hb-mark-loop::before{background:#c9ff19;}",
+    ".file-card.hb-mark-video::before{background:#4fb6ff;}",
+    ".file-card.hb-mark-loop .hb-type-badge{background:#c9ff19;color:#10160a;}",
+    ".file-card.hb-mark-video .hb-type-badge{background:#4fb6ff;color:#042539;}",
+    ".file-card.hb-mark-audio .hb-type-badge{background:rgba(255,255,255,.9);color:#111;}",
+    /* Vorschau ohne schwarze Balken/Overlay: Bild/Video fuellt die Box (statt letterbox) */
+    ".preview video,.preview img{object-fit:cover !important;}",
+    ".file-grid.is-list .preview video,.file-grid.is-list .preview img{object-fit:cover !important;}",
+    /* Native Video-Steuerleiste in der Vorschau ausblenden (das war das 'schwarze Overlay') */
+    ".preview video{pointer-events:none !important;}",
+    ".preview video::-webkit-media-controls{display:none !important;}",
+    ".preview video::-webkit-media-controls-enclosure{display:none !important;}",
+    ".preview video::-webkit-media-controls-panel{display:none !important;}",
+    ".preview video::-webkit-media-controls-start-playback-button{display:none !important;}"
+  ].join("\n");
+  document.head.appendChild(style);
+
+  var orig = buildFileCard;
+  buildFileCard = function(file){
+    var card = orig(file);
+    try{ hbEnhanceCard(card, file); }catch(e){}
+    return card;
+  };
+
+  function hbEnhanceCard(card, file){
+    if (!card || !card.classList) return;
+    var name = file.original_name || "";
+    var mime = file.mime_type || "";
+    var isLoop  = /loop/i.test(name);
+    var isVideo = mime.indexOf("video/") === 0;
+    var isAudio = mime.indexOf("audio/") === 0;
+    var isImage = mime.indexOf("image/") === 0;
+
+    if (isLoop) card.classList.add("hb-mark-loop");
+    else if (isVideo) card.classList.add("hb-mark-video"); /* Video (mit Audio) */
+    else if (isAudio) card.classList.add("hb-mark-audio");
+
+    var preview = card.querySelector(".preview");
+    if (preview && !preview.querySelector(".hb-type-badge")) {
+      var badge = document.createElement("span");
+      badge.className = "hb-type-badge";
+      var typeLabel = isVideo ? "Video" : isAudio ? "Audio" : isImage ? "Bild" : (file.category || "Datei");
+      badge.textContent = (isLoop ? "Loop · " : "") + typeLabel;
+      preview.appendChild(badge);
+    }
+
+    // Video-Vorschau: Inhalts-Frame EINMAL als Poster-Bild cachen (pro Datei-ID).
+    // Bei jedem weiteren Render -> Poster sofort setzen, preload=none -> kein Neu-Laden/Seek/Flackern.
+    var video = card.querySelector("video");
+    if (video) {
+      window.__hbPosters = window.__hbPosters || {};
+      var pid = file.id;
+      if (pid && window.__hbPosters[pid]) {
+        video.poster = window.__hbPosters[pid];
+        video.preload = "none";       // kein Video laden -> Poster bleibt stehen, kein Flackern
+        video.dataset.hbSeeked = "1";
+      } else if (!video.dataset.hbSeek) {
+        video.dataset.hbSeek = "1";
+        var seekToContent = function(){
+          try {
+            if (video.dataset.hbSeeked) return;
+            var d = video.duration;
+            if (!isFinite(d) || d <= 0) return;
+            video.dataset.hbSeeked = "1";
+            video.currentTime = Math.min(Math.max(d * 0.2, 2.5), d - 0.1, 12);
+          } catch (e) {}
+        };
+        var capturePoster = function(){
+          try {
+            if (!pid || window.__hbPosters[pid]) return;
+            var w = video.videoWidth, h = video.videoHeight;
+            if (!w || !h) return;
+            var scale = Math.min(1, 480 / w);
+            var c = document.createElement("canvas");
+            c.width = Math.round(w * scale); c.height = Math.round(h * scale);
+            c.getContext("2d").drawImage(video, 0, 0, c.width, c.height);
+            window.__hbPosters[pid] = c.toDataURL("image/jpeg", 0.72);
+            video.poster = window.__hbPosters[pid];
+          } catch (e) {}
+        };
+        video.addEventListener("loadedmetadata", seekToContent);
+        video.addEventListener("loadeddata", seekToContent);
+        video.addEventListener("seeked", capturePoster);
+        if (video.readyState >= 1) seekToContent();
+      }
+    }
+  }
+})();
+
+/* ===== HB-Enhance V2: UI-Fixes (rot/sticky/inline-rename/klick-play) ===== */
+(function(){
+  if (window.__hbUi2) return; window.__hbUi2 = true;
+
+  var s = document.createElement("style");
+  s.textContent = [
+    /* "Aus Show entfernen" rot wie Papierkorb */
+    ".btn-show.btn-remove{background:rgba(230,60,60,.16) !important;border-color:rgba(240,80,80,.55) !important;color:#ff8f8f !important;}",
+    ".btn-show.btn-remove:hover{background:rgba(230,60,60,.30) !important;color:#ffc2c2 !important;}",
+    /* User-Box (Chris/Logout) immer sichtbar: sticky unten in der Sidebar */
+    ".sidebar{display:flex !important;flex-direction:column !important;}",
+    ".sidebar .user-box{position:sticky !important;bottom:0 !important;z-index:30 !important;margin-top:auto !important;background:var(--bg-card,#12160e) !important;box-shadow:0 -8px 20px rgba(0,0,0,.35) !important;}",
+    ".hb-rename-input{font:inherit;color:inherit;background:rgba(255,255,255,.10);border:1px solid var(--lime,#c9ff19);border-radius:6px;padding:2px 6px;min-width:120px;max-width:100%;}",
+    ".preview video{pointer-events:auto !important;cursor:pointer;}"
+  ].join("\n");
+  document.head.appendChild(s);
+
+  /* Rename inline statt prompt-Popup */
+  function saveRename(file, name){
+    fetch("/api/files/" + file.id, {method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify({name:name})})
+      .then(function(r){return r.json();})
+      .then(function(){ if (typeof render === "function") render(); })
+      .catch(function(){});
+  }
+  function inlineRename(file){
+    var span = Array.prototype.find.call(document.querySelectorAll(".file-name span"), function(el){
+      return el.childNodes.length===1 && el.textContent === file.original_name;
+    });
+    if (!span){ var nn=window.prompt("Neuer Name", file.original_name); if(nn && nn!==file.original_name) saveRename(file, nn); return; }
+    var old = file.original_name;
+    var input = document.createElement("input");
+    input.type="text"; input.value=old; input.className="hb-rename-input";
+    span.replaceWith(input); input.focus(); input.select();
+    var done=false;
+    function finish(save){
+      if(done)return; done=true;
+      var nn=input.value.trim();
+      var ns=document.createElement("span"); ns.textContent=(save&&nn)?nn:old;
+      input.replaceWith(ns);
+      if(save && nn && nn!==old) saveRename(file, nn);
+    }
+    input.addEventListener("keydown", function(e){ if(e.key==="Enter"){e.preventDefault();finish(true);} else if(e.key==="Escape"){e.preventDefault();finish(false);} });
+    input.addEventListener("blur", function(){ finish(true); });
+  }
+  if (typeof renameFile === "function") { renameFile = function(file){ inlineRename(file); }; }
+
+  /* Klick auf Video-Vorschau -> direkt abspielen (kein extra Play-Klick) */
+  if (typeof buildFileCard === "function") {
+    var _bfc = buildFileCard;
+    buildFileCard = function(file){
+      var card = _bfc(file);
+      try {
+        var video = card.querySelector("video");
+        if (video) {
+          video.style.pointerEvents = "auto";
+          video.controls = false;
+          var preview = card.querySelector(".preview");
+          if (preview) preview.onclick = null; /* nicht Modal öffnen */
+          video.addEventListener("click", function(e){
+            e.stopPropagation();
+            if (video.paused){ video.controls = true; video.muted = false; video.play().catch(function(){}); }
+            else { video.pause(); }
+          });
+        }
+      } catch(e){}
+      return card;
+    };
+  }
+})();
+
+/* ===== HB-Enhance V3: Ansicht-Slider (Liste/Kacheln) schaltet nur die CSS-Klasse um -> kein Rerender ===== */
+(function(){
+  if (window.__hbSliderFix) return; window.__hbSliderFix = true;
+  if (typeof buildViewControls !== "function") return;
+  var _bvc = buildViewControls;
+  buildViewControls = function(onChange){
+    var bar = _bvc(onChange);
+    try {
+      var slider = bar.querySelector('input[type="range"]');
+      if (slider) {
+        slider.oninput = function(){
+          var v = Number(slider.value);
+          try { viewScale = v; } catch(e){}
+          try { localStorage.setItem("fileViewScale", String(v)); } catch(e){}
+          // Nur die Grid-Klasse tauschen -> Layout via CSS, keine Karten/Videos neu bauen
+          var grids = document.querySelectorAll(".file-grid");
+          for (var i=0;i<grids.length;i++){
+            grids[i].className = "file-grid " + (v===0 ? "is-list" : "tile-"+v);
+          }
+        };
+      }
+    } catch(e){}
+    return bar;
+  };
+})();
+
+/* ===== HB-Enhance V4: "Alle laden" (ZIP) pro Projekt ===== */
+(function(){
+  if (window.__hbDownloadAll) return; window.__hbDownloadAll = true;
+  function ensureBtn(){
+    var bar = document.querySelector(".view-controls");
+    if (!bar) return;
+    if (typeof currentProjectId === "undefined" || !currentProjectId) return;
+    var existing = bar.querySelector(".hb-dl-all");
+    var href = "/api/projects/" + currentProjectId + "/download-all";
+    if (existing) { existing.href = href; return; }
+    var a = document.createElement("a");
+    a.className = "hb-dl-all btn-small btn-ghost";
+    a.href = href;
+    a.textContent = "⬇ Alle laden";
+    a.title = "Alle Dateien dieses Projekts als ZIP herunterladen";
+    a.style.cssText = "margin-left:auto;text-decoration:none;white-space:nowrap;";
+    bar.appendChild(a);
+  }
+  try {
+    var mo = new MutationObserver(function(){ ensureBtn(); });
+    mo.observe(document.body, { childList: true, subtree: true });
+  } catch(e){}
+  setTimeout(ensureBtn, 600);
+})();
+
+/* ===== HB-Enhance V5: Admin-User-Doppelung (async Render-Race) verhindern ===== */
+(function(){
+  if (window.__hbAdminDedupe) return; window.__hbAdminDedupe = true;
+  if (typeof renderAdmin !== "function") return;
+  var _ra = renderAdmin;
+  renderAdmin = async function(){
+    var r;
+    try { r = await _ra.apply(this, arguments); } catch(e){}
+    try { dedupeAdmin(); } catch(e){}
+    return r;
+  };
+  function dedupeAdmin(){
+    var view = document.getElementById("view"); if (!view) return;
+    ["view-intro", "admin-create-user", "admin-list"].forEach(function(cls){
+      var els = Array.prototype.filter.call(view.children, function(c){ return c.classList && c.classList.contains(cls); });
+      for (var i = 1; i < els.length; i++) { if (els[i].parentElement) els[i].parentElement.removeChild(els[i]); }
+    });
+  }
+})();
