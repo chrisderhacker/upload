@@ -5,6 +5,8 @@ let currentFiles = [];
 let currentPeople = [];
 let currentView = "dashboard";
 let currentCategory = null;
+let currentFolder = "";
+let currentFolders = [];
 let uploadState = null;
 let uploadQueue = [];
 let uploadErrors = 0;
@@ -79,7 +81,9 @@ const ICON_PATHS = {
   user: "M4 22C4 17.5817 7.58172 14 12 14C16.4183 14 20 17.5817 20 22H18C18 18.6863 15.3137 16 12 16C8.68629 16 6 18.6863 6 22H4ZM12 13C8.685 13 6 10.315 6 7C6 3.685 8.685 1 12 1C15.315 1 18 3.685 18 7C18 10.315 15.315 13 12 13ZM12 11C14.21 11 16 9.21 16 7C16 4.79 14.21 3 12 3C9.79 3 8 4.79 8 7C8 9.21 9.79 11 12 11Z",
   phone: "M9.36556 10.6821C10.302 12.3288 11.6712 13.698 13.3179 14.6344L14.2024 13.3961C14.4965 12.9845 15.0516 12.8573 15.4956 13.0998C16.9024 13.8683 18.4571 14.3353 20.0789 14.4637C20.599 14.5049 21 14.9389 21 15.4606V19.9234C21 20.4361 20.6122 20.8657 20.1022 20.9181C19.5723 20.9726 19.0377 21 18.5 21C9.93959 21 3 14.0604 3 5.5C3 4.96227 3.02742 4.42771 3.08189 3.89776C3.1343 3.38775 3.56394 3 4.07665 3H8.53942C9.0611 3 9.49513 3.40104 9.5363 3.92109C9.66467 5.54288 10.1317 7.09764 10.9002 8.50444C11.1427 8.9484 11.0155 9.50354 10.6039 9.79757L9.36556 10.6821ZM6.84425 10.0252L8.7442 8.66809C8.20547 7.50514 7.83628 6.27183 7.64727 5H5.00907C5.00303 5.16632 5 5.333 5 5.5C5 12.9558 11.0442 19 18.5 19C18.667 19 18.8337 18.997 19 18.9909V16.3527C17.7282 16.1637 16.4949 15.7945 15.3319 15.2558L13.9748 17.1558C13.4258 16.9425 12.8956 16.6915 12.3874 16.4061L12.3293 16.373C10.3697 15.2587 8.74134 13.6303 7.627 11.6707L7.59394 11.6126C7.30849 11.1044 7.05754 10.5742 6.84425 10.0252Z",
   add: "M11 11V5H13V11H19V13H13V19H11V13H5V11H11Z",
-  chat: "M6.45455 19L2 22.5V4C2 3.44772 2.44772 3 3 3H21C21.5523 3 22 3.44772 22 4V18C22 18.5523 21.5523 19 21 19H6.45455ZM5.76282 17H20V5H4V18.3851L5.76282 17Z"
+  chat: "M6.45455 19L2 22.5V4C2 3.44772 2.44772 3 3 3H21C21.5523 3 22 3.44772 22 4V18C22 18.5523 21.5523 19 21 19H6.45455ZM5.76282 17H20V5H4V18.3851L5.76282 17Z",
+  back: "M10.8284 12.0007L15.7782 16.9504L14.364 18.3646L8 12.0007L14.364 5.63672L15.7782 7.05093L10.8284 12.0007Z",
+  star: "M12 17.27L18.18 21L16.54 13.97L22 9.24L14.81 8.63L12 2L9.19 8.63L2 9.24L7.46 13.97L5.82 21L12 17.27Z"
 };
 
 function icon(name, cls) {
@@ -413,7 +417,9 @@ async function loadProjects() {
   renderProjectHead();
 
   if (!currentProjectId && currentProjects[0]) {
-    await selectProject(currentProjects[0]);
+    const savedId = Number(localStorage.getItem("lastProjectId"));
+    const lastProject = currentProjects.find((p) => p.id === savedId);
+    await selectProject(lastProject || currentProjects[0]);
   }
 }
 
@@ -450,7 +456,9 @@ async function deleteProject(project) {
 
 async function selectProject(project) {
   currentProjectId = project.id;
+  localStorage.setItem("lastProjectId", String(project.id));
   await loadFiles();
+  await loadFolders();
   await loadPeople();
   await loadProjects();
   render();
@@ -463,6 +471,15 @@ async function loadFiles() {
   }
   const res = await fetch(`/api/projects/${currentProjectId}/files`);
   currentFiles = res.ok ? await res.json() : [];
+}
+
+async function loadFolders() {
+  if (!currentProjectId) {
+    currentFolders = [];
+    return;
+  }
+  const res = await fetch(`/api/projects/${currentProjectId}/folders`);
+  currentFolders = res.ok ? await res.json() : [];
 }
 
 async function loadPeople() {
@@ -545,9 +562,23 @@ projectImageInput.onchange = async () => {
 /* ---------- Routing ---------- */
 
 function parseHash() {
-  const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
+  // Browser kodieren Sonderzeichen (z. B. Leerzeichen) im Hash automatisch beim Setzen –
+  // beim Lesen (z. B. nach F5) muss jedes Segment daher wieder dekodiert werden.
+  const parts = location.hash
+    .replace(/^#\/?/, "")
+    .split("/")
+    .filter(Boolean)
+    .map((p) => decodeURIComponent(p));
   currentView = parts[0] || "dashboard";
   currentCategory = currentView === "uploads" ? parts[1] || null : null;
+  currentFolder = currentView === "uploads" ? parts.slice(2).join("/") : "";
+}
+
+function uploadsHash(category, folder) {
+  let hash = "#/uploads";
+  if (category) hash += "/" + category;
+  if (category && folder) hash += "/" + folder;
+  return hash;
 }
 
 window.addEventListener("hashchange", () => {
@@ -715,8 +746,8 @@ function renderUploads() {
   dropzone.innerHTML = `
     <div>
       ${icon("uploads", "icon dropzone-icon")}
-      <strong>Dateien hierher ziehen</strong>
-      <span>oder klicken zum Auswählen</span>
+      <strong>Dateien oder Ordner hierher ziehen</strong>
+      <span>oder klicken zum Auswählen · <a class="dropzone-folder-link">ganzen Ordner hochladen</a></span>
     </div>
   `;
 
@@ -726,17 +757,48 @@ function renderUploads() {
   fileInput.hidden = true;
   dropzone.appendChild(fileInput);
 
-  dropzone.onclick = () => fileInput.click();
-  fileInput.onchange = () => uploadFiles(fileInput.files);
+  const folderInput = document.createElement("input");
+  folderInput.type = "file";
+  folderInput.multiple = true;
+  folderInput.webkitdirectory = true;
+  folderInput.directory = true;
+  folderInput.hidden = true;
+  dropzone.appendChild(folderInput);
+
+  dropzone.onclick = (e) => {
+    if (e.target.closest(".dropzone-folder-link")) return;
+    fileInput.click();
+  };
+  dropzone.querySelector(".dropzone-folder-link").onclick = (e) => {
+    e.stopPropagation();
+    folderInput.click();
+  };
+
+  fileInput.onchange = () => {
+    uploadFiles([...fileInput.files].map((file) => ({ file, folder: combineFolder(relativeDirOf(file)) })));
+    fileInput.value = "";
+  };
+  folderInput.onchange = () => {
+    uploadFiles([...folderInput.files].map((file) => ({ file, folder: combineFolder(relativeDirOf(file)) })));
+    folderInput.value = "";
+  };
+
   dropzone.ondragover = (e) => {
     e.preventDefault();
     dropzone.classList.add("is-dragover");
   };
   dropzone.ondragleave = () => dropzone.classList.remove("is-dragover");
-  dropzone.ondrop = (e) => {
+  dropzone.ondrop = async (e) => {
     e.preventDefault();
     dropzone.classList.remove("is-dragover");
-    uploadFiles(e.dataTransfer.files);
+
+    const items = e.dataTransfer.items;
+    if (items && items.length && [...items].some((it) => it.webkitGetAsEntry)) {
+      const entries = await collectDroppedEntries(items);
+      uploadFiles(entries.map(({ file, relDir }) => ({ file, folder: combineFolder(relDir) })));
+    } else {
+      uploadFiles([...e.dataTransfer.files].map((file) => ({ file, folder: combineFolder("") })));
+    }
   };
 
   viewEl.appendChild(dropzone);
@@ -777,6 +839,10 @@ function renderUploads() {
 
   viewEl.appendChild(tiles);
 
+  const folderBar = document.createElement("div");
+  folderBar.id = "folderBar";
+  viewEl.appendChild(folderBar);
+
   const searchBox = document.createElement("div");
   searchBox.className = "search-box";
   searchBox.innerHTML = icon("search", "icon icon-sm search-icon");
@@ -792,6 +858,8 @@ function renderUploads() {
   const gridWrap = document.createElement("div");
 
   const refreshGrid = () => {
+    renderFolderBar(folderBar);
+
     let files = currentCategory
       ? currentFiles.filter((f) => (f.category || "other") === currentCategory)
       : currentFiles;
@@ -799,11 +867,24 @@ function renderUploads() {
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       files = files.filter((f) => (f.original_name || "").toLowerCase().includes(q));
+    } else if (currentCategory) {
+      files = files.filter((f) => (f.folder || "") === currentFolder);
     }
+
+    const folders = currentCategory && !searchQuery ? directSubfolders(currentCategory, currentFolder) : [];
 
     gridWrap.innerHTML = "";
     gridWrap.appendChild(
-      buildFileGrid(sortFiles(files), searchQuery ? "Keine Dateien gefunden." : "Noch keine Dateien in dieser Kategorie.")
+      buildBrowserGrid(
+        folders,
+        sortFiles(files),
+        currentCategory,
+        searchQuery
+          ? "Keine Dateien gefunden."
+          : currentCategory
+          ? "Noch keine Dateien oder Ordner hier."
+          : "Noch keine Dateien in dieser Kategorie."
+      )
     );
   };
 
@@ -824,13 +905,282 @@ function renderUploads() {
 // so springt beim Klick nichts, nur Aktiv-Markierung und Dateiliste ändern sich.
 function selectCategory(key) {
   currentCategory = key;
-  history.replaceState(null, "", key ? `#/uploads/${key}` : "#/uploads");
+  currentFolder = "";
+  history.replaceState(null, "", uploadsHash(key, ""));
 
   document.querySelectorAll(".category-tile").forEach((tile) => {
     tile.classList.toggle("is-active", tile.dataset.cat === (key || "all"));
   });
 
   if (uploadsRefreshGrid) uploadsRefreshGrid();
+}
+
+function navigateFolder(path) {
+  currentFolder = path;
+  history.replaceState(null, "", uploadsHash(currentCategory, path));
+  if (uploadsRefreshGrid) uploadsRefreshGrid();
+}
+
+// Direkte Kind-Ordner (kein tieferes Verschachteln in der Anzeige) für eine Kategorie/Pfad-Ebene.
+function directSubfolders(category, parent) {
+  const prefix = parent ? parent + "/" : "";
+  const seen = new Set();
+  const result = [];
+
+  for (const folder of currentFolders) {
+    if (folder.category !== category || !folder.path.startsWith(prefix)) continue;
+    const rest = folder.path.slice(prefix.length);
+    if (!rest || rest.includes("/")) continue;
+    if (seen.has(folder.path)) continue;
+    seen.add(folder.path);
+    result.push(folder);
+  }
+
+  return result.sort((a, b) => a.path.localeCompare(b.path, "de", { sensitivity: "base" }));
+}
+
+function folderFileCount(category, path) {
+  const prefix = path + "/";
+  return currentFiles.filter(
+    (f) => (f.category || "other") === category && (f.folder === path || (f.folder || "").startsWith(prefix))
+  ).length;
+}
+
+function renderFolderBar(bar) {
+  bar.innerHTML = "";
+  if (!currentCategory) return;
+
+  bar.className = "folder-bar";
+
+  const left = document.createElement("div");
+  left.className = "folder-bar-left";
+
+  if (currentFolder) {
+    const backBtn = document.createElement("button");
+    backBtn.type = "button";
+    backBtn.className = "btn-icon-ghost folder-back";
+    backBtn.title = "Eine Ebene zurück";
+    backBtn.innerHTML = icon("back", "icon icon-sm");
+    backBtn.onclick = () => {
+      const parts = currentFolder.split("/");
+      parts.pop();
+      navigateFolder(parts.join("/"));
+    };
+    left.appendChild(backBtn);
+  }
+
+  const crumbs = document.createElement("div");
+  crumbs.className = "folder-crumbs";
+
+  const catLabel = (CATEGORIES.find((c) => c.key === currentCategory) || {}).label || currentCategory;
+  const segments = currentFolder ? currentFolder.split("/") : [];
+
+  const rootCrumb = document.createElement("a");
+  rootCrumb.href = uploadsHash(currentCategory, "");
+  rootCrumb.textContent = catLabel;
+  rootCrumb.className = segments.length === 0 ? "is-current" : "";
+  rootCrumb.onclick = (e) => {
+    e.preventDefault();
+    navigateFolder("");
+  };
+  crumbs.appendChild(rootCrumb);
+
+  let acc = "";
+  segments.forEach((seg, i) => {
+    acc = acc ? `${acc}/${seg}` : seg;
+    const sep = document.createElement("span");
+    sep.className = "folder-crumb-sep";
+    sep.textContent = "/";
+    crumbs.appendChild(sep);
+
+    const path = acc;
+    const crumb = document.createElement("a");
+    crumb.href = uploadsHash(currentCategory, path);
+    crumb.textContent = seg;
+    if (i === segments.length - 1) crumb.className = "is-current";
+    crumb.onclick = (e) => {
+      e.preventDefault();
+      navigateFolder(path);
+    };
+    crumbs.appendChild(crumb);
+  });
+
+  left.appendChild(crumbs);
+  bar.appendChild(left);
+
+  if (canUploadFiles()) {
+    const newFolderBtn = document.createElement("button");
+    newFolderBtn.type = "button";
+    newFolderBtn.className = "btn-small btn-ghost";
+    newFolderBtn.innerHTML = icon("add", "icon icon-sm") + " Neuer Ordner";
+    newFolderBtn.onclick = () => createFolder(currentCategory, currentFolder);
+    bar.appendChild(newFolderBtn);
+  }
+}
+
+async function createFolder(category, parent) {
+  const name = prompt("Name des neuen Ordners:");
+  if (!name || !name.trim()) return;
+
+  const res = await fetch(`/api/projects/${currentProjectId}/folders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ category, parent, name: name.trim() })
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    alert(body.error || "Ordner konnte nicht angelegt werden.");
+    return;
+  }
+
+  await loadFolders();
+  if (uploadsRefreshGrid) uploadsRefreshGrid();
+}
+
+async function deleteFolder(folder) {
+  if (!confirm(`Ordner "${folder.path.split("/").pop()}" wirklich löschen?`)) return;
+
+  const res = await fetch(`/api/folders/${folder.id}`, { method: "DELETE" });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    alert(body.error || "Ordner konnte nicht gelöscht werden.");
+    return;
+  }
+
+  await loadFolders();
+  if (uploadsRefreshGrid) uploadsRefreshGrid();
+}
+
+const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "avif", "heic", "heif"];
+const VIDEO_EXTENSIONS = ["mp4", "mov", "webm", "m4v", "avi", "mkv"];
+
+// Nicht nur auf mime_type verlassen: generische Werte wie "application/octet-stream"
+// sind zwar gesetzt (truthy), sagen aber nichts über den echten Dateityp aus.
+function isImageFile(f) {
+  const ext = (f.original_name || "").toLowerCase().split(".").pop();
+  return (f.mime_type && f.mime_type.startsWith("image/")) || IMAGE_EXTENSIONS.includes(ext);
+}
+
+function isVideoFile(f) {
+  const ext = (f.original_name || "").toLowerCase().split(".").pop();
+  return (f.mime_type && f.mime_type.startsWith("video/")) || VIDEO_EXTENSIONS.includes(ext);
+}
+
+// Repräsentative Datei eines Ordners für die Vorschau. Sucht zuerst innerhalb der eigenen
+// Kategorie (z. B. "Bilder"), fällt aber auf ein Bild/Video aus einer anderen Kategorie mit
+// demselben Ordnerpfad zurück – ein Ordner kann z. B. sowohl unter "Bilder" als auch unter
+// "Text" denselben Namen haben, wenn dort gemischte Dateien liegen.
+function folderPreviewFile(category, path) {
+  const prefix = path + "/";
+  const inPath = (f) => f.folder === path || (f.folder || "").startsWith(prefix);
+  const isVisual = (f) => isImageFile(f) || isVideoFile(f);
+
+  const sameCategory = currentFiles.filter((f) => (f.category || "other") === category && inPath(f));
+  const anyCategory = currentFiles.filter(inPath);
+
+  return sameCategory.find(isVisual) || anyCategory.find(isVisual) || sameCategory[0] || null;
+}
+
+function buildFolderCard(folder, category) {
+  const card = document.createElement("div");
+  card.className = "file-card folder-card";
+
+  const preview = document.createElement("div");
+  preview.className = "preview folder-preview";
+  preview.title = "Ordner öffnen";
+  preview.onclick = () => navigateFolder(folder.path);
+
+  const repFile = folderPreviewFile(category, folder.path);
+  if (repFile && isImageFile(repFile)) {
+    const img = document.createElement("img");
+    img.src = repFile.path;
+    img.loading = "lazy";
+    img.alt = "";
+    preview.appendChild(img);
+  } else if (repFile && isVideoFile(repFile)) {
+    const video = document.createElement("video");
+    video.src = repFile.path + "#t=0.5";
+    video.preload = "metadata";
+    video.muted = true;
+    preview.appendChild(video);
+  } else {
+    preview.innerHTML = icon(repFile ? repFile.category || "other" : "archive", "icon file-icon");
+  }
+
+  const badge = document.createElement("span");
+  badge.className = "folder-preview-badge";
+  badge.innerHTML = icon("archive", "icon icon-sm");
+  preview.appendChild(badge);
+
+  card.appendChild(preview);
+
+  const body = document.createElement("div");
+  body.className = "file-body";
+
+  const name = document.createElement("div");
+  name.className = "file-name";
+  name.title = folder.path;
+  const nameText = document.createElement("span");
+  nameText.textContent = folder.path.split("/").pop();
+  name.appendChild(nameText);
+  body.appendChild(name);
+
+  const count = folderFileCount(category, folder.path);
+  const meta = document.createElement("div");
+  meta.className = "file-meta";
+  meta.textContent = `Ordner · ${count} Datei${count === 1 ? "" : "en"}`;
+  body.appendChild(meta);
+
+  const footer = document.createElement("div");
+  footer.className = "file-footer";
+
+  const badgeEl = document.createElement("span");
+  badgeEl.className = "badge badge-muted";
+  badgeEl.textContent = "Ordner";
+  footer.appendChild(badgeEl);
+
+  const btnGroup = document.createElement("div");
+  btnGroup.className = "file-actions";
+
+  const openBtn = document.createElement("button");
+  openBtn.className = "btn-small";
+  openBtn.textContent = "Öffnen";
+  openBtn.onclick = () => navigateFolder(folder.path);
+  btnGroup.appendChild(openBtn);
+
+  if (canUploadFiles()) {
+    const del = document.createElement("button");
+    del.className = "btn-small btn-danger btn-icon";
+    del.title = "Ordner löschen";
+    del.innerHTML = icon("trash", "icon icon-sm");
+    del.onclick = () => deleteFolder(folder);
+    btnGroup.appendChild(del);
+  }
+
+  footer.appendChild(btnGroup);
+  body.appendChild(footer);
+  card.appendChild(body);
+
+  return card;
+}
+
+function buildBrowserGrid(folders, files, category, emptyText) {
+  if (folders.length === 0 && files.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = emptyText;
+    return empty;
+  }
+
+  const grid = document.createElement("div");
+  grid.className = "file-grid " + (viewScale === 0 ? "is-list" : `tile-${viewScale}`);
+
+  for (const folder of folders) grid.appendChild(buildFolderCard(folder, category));
+  for (const file of files) grid.appendChild(buildFileCard(file));
+
+  return grid;
 }
 
 function renderShow() {
@@ -1719,7 +2069,20 @@ function buildFileCard(file) {
   const card = document.createElement("div");
   card.className = "file-card";
 
-  card.appendChild(createPreview(file));
+  const preview = createPreview(file);
+
+  const star = document.createElement("button");
+  star.type = "button";
+  star.className = "file-star" + (file.starred ? " is-active" : "");
+  star.title = file.starred ? "Markierung entfernen" : "Markieren";
+  star.innerHTML = icon("star", "icon icon-sm");
+  star.onclick = (e) => {
+    e.stopPropagation();
+    toggleStar(file, star);
+  };
+  preview.appendChild(star);
+
+  card.appendChild(preview);
 
   const body = document.createElement("div");
   body.className = "file-body";
@@ -2041,13 +2404,13 @@ function createPreview(file) {
   const ext = (file.original_name || "").toLowerCase().split(".").pop();
   const isPdfLike = file.mime_type === "application/pdf" || ext === "pdf" || ext === "ai";
 
-  if (file.mime_type && file.mime_type.startsWith("image/")) {
+  if (isImageFile(file)) {
     const img = document.createElement("img");
     img.src = file.path;
     img.loading = "lazy";
     img.alt = file.original_name;
     wrap.appendChild(img);
-  } else if (file.mime_type && file.mime_type.startsWith("video/")) {
+  } else if (isVideoFile(file)) {
     const video = document.createElement("video");
     video.src = file.path;
     video.controls = true;
@@ -2101,6 +2464,71 @@ function formatDate(sqliteDate) {
 
 /* ---------- Aktionen ---------- */
 
+// Ordnerpfad, in dem ein Datei-Objekt relativ zu seinem hochgeladenen Ordner/Auswahl liegt.
+function relativeDirOf(file) {
+  const rel = file.webkitRelativePath || "";
+  if (!rel) return "";
+  const parts = rel.split("/");
+  parts.pop();
+  return parts.join("/");
+}
+
+// Verknüpft den aktuell geöffneten Ordner (Browsing-Kontext) mit einem relativen Unterpfad.
+function combineFolder(relDir) {
+  const base = currentCategory ? currentFolder : "";
+  if (!relDir) return base;
+  return base ? `${base}/${relDir}` : relDir;
+}
+
+// Liest per Drag & Drop übergebene Ordner rekursiv aus (File System Access Entries API)
+// und liefert eine flache Liste aus { file, relDir } – relDir ist der Pfad innerhalb des gezogenen Ordners.
+function collectDroppedEntries(items) {
+  const rootEntries = [...items]
+    .map((item) => (item.webkitGetAsEntry ? item.webkitGetAsEntry() : null))
+    .filter(Boolean);
+
+  const results = [];
+
+  function readAllDirectoryEntries(reader) {
+    return new Promise((resolve, reject) => {
+      const all = [];
+      const readBatch = () => {
+        reader.readEntries((entries) => {
+          if (entries.length === 0) {
+            resolve(all);
+            return;
+          }
+          all.push(...entries);
+          readBatch();
+        }, reject);
+      };
+      readBatch();
+    });
+  }
+
+  async function walk(entry, relDir) {
+    if (entry.isFile) {
+      await new Promise((resolve) => {
+        entry.file(
+          (file) => {
+            results.push({ file, relDir });
+            resolve();
+          },
+          () => resolve()
+        );
+      });
+    } else if (entry.isDirectory) {
+      const childDir = relDir ? `${relDir}/${entry.name}` : entry.name;
+      const children = await readAllDirectoryEntries(entry.createReader());
+      for (const child of children) {
+        await walk(child, childDir);
+      }
+    }
+  }
+
+  return Promise.all(rootEntries.map((entry) => walk(entry, ""))).then(() => results);
+}
+
 function updateUploadProgress() {
   const box = document.getElementById("uploadProgress");
   if (!box) return;
@@ -2110,85 +2538,113 @@ function updateUploadProgress() {
     return;
   }
 
+  const percent = uploadState.total > 0 ? Math.round((uploadState.done / uploadState.total) * 100) : 0;
+
   box.classList.add("is-active");
-  box.querySelector(".upload-progress-bar").style.width = uploadState.percent + "%";
-
-  const pending = uploadQueue.length;
-  let text =
-    uploadState.percent >= 100
-      ? "Wird verarbeitet …"
-      : `Lade ${uploadState.count} Datei${uploadState.count === 1 ? "" : "en"} hoch … ${uploadState.percent}%`;
-  if (pending > 0) {
-    text += ` · ${pending} in Warteschlange`;
-  }
-  box.querySelector(".upload-progress-text").textContent = text;
+  box.querySelector(".upload-progress-bar").style.width = percent + "%";
+  box.querySelector(".upload-progress-text").textContent =
+    `Lade Dateien hoch … ${uploadState.done}/${uploadState.total}` +
+    (uploadErrors > 0 ? ` · ${uploadErrors} fehlgeschlagen` : "");
 }
 
-// Neue Dateien werden gesammelt und der Reihe nach hochgeladen –
-// auch wenn während eines laufenden Uploads weitere hinzukommen.
-function uploadFiles(files) {
-  if (!currentProjectId || !files || files.length === 0) return;
+const UPLOAD_CONCURRENCY = 3;
+let uploadActive = 0;
+let uploadFailedNames = [];
 
-  for (const file of files) {
-    uploadQueue.push(file);
-  }
+// Jede Datei wird einzeln hochgeladen (statt als ein großer Sammel-Request): schlägt eine
+// Datei fehl (z. B. Netzwerkabbruch bei großen Dateien), bleiben bereits hochgeladene Dateien
+// erhalten und die restliche Warteschlange läuft weiter, statt alles zu verwerfen.
+function uploadFiles(entries) {
+  if (!currentProjectId || !entries || entries.length === 0) return;
 
-  if (uploadState) {
-    updateUploadProgress();
-  } else {
+  const valid = entries.filter((entry) => entry && entry.file);
+  if (valid.length === 0) return;
+
+  if (!uploadState) {
     uploadErrors = 0;
-    processUploadQueue();
+    uploadFailedNames = [];
+    uploadState = { total: 0, done: 0 };
+  }
+
+  uploadState.total += valid.length;
+  for (const entry of valid) uploadQueue.push(entry);
+
+  updateUploadProgress();
+  fillUploadSlots();
+}
+
+function fillUploadSlots() {
+  while (uploadActive < UPLOAD_CONCURRENCY && uploadQueue.length > 0) {
+    const entry = uploadQueue.shift();
+    uploadActive++;
+    uploadOne(entry);
+  }
+
+  if (uploadActive === 0 && uploadQueue.length === 0 && uploadState) {
+    finishUploadBatch();
   }
 }
 
-function processUploadQueue() {
-  if (uploadQueue.length === 0) {
-    uploadState = null;
-    updateUploadProgress();
-    loadFiles().then(() => {
-      render();
-      if (uploadErrors > 0) {
-        alert(
-          `${uploadErrors} Datei${uploadErrors === 1 ? " konnte" : "en konnten"} nicht hochgeladen werden. Bitte erneut versuchen.`
-        );
-        uploadErrors = 0;
-      }
-    });
-    return;
-  }
-
-  const batch = uploadQueue;
-  uploadQueue = [];
-
+function uploadOne(entry) {
   const formData = new FormData();
-  for (const file of batch) {
-    formData.append("files", file);
-  }
-
-  uploadState = { percent: 0, count: batch.length };
-  updateUploadProgress();
+  formData.append("files", entry.file);
+  formData.append("folder", entry.folder || "");
 
   const xhr = new XMLHttpRequest();
   xhr.open("POST", `/api/projects/${currentProjectId}/upload`);
 
-  xhr.upload.onprogress = (e) => {
-    if (e.lengthComputable && uploadState) {
-      uploadState.percent = Math.round((e.loaded / e.total) * 100);
-      updateUploadProgress();
-    }
-  };
-
   xhr.onload = () => {
-    if (xhr.status >= 400) uploadErrors += batch.length;
-    processUploadQueue();
+    uploadActive--;
+
+    if (xhr.status >= 400) {
+      uploadErrors++;
+      uploadFailedNames.push(entry.file.name);
+    } else {
+      try {
+        const saved = JSON.parse(xhr.responseText);
+        for (const file of saved) currentFiles.unshift(file);
+        if (currentView === "uploads" && uploadsRefreshGrid) uploadsRefreshGrid();
+      } catch {
+        uploadErrors++;
+        uploadFailedNames.push(entry.file.name);
+      }
+    }
+
+    uploadState.done++;
+    updateUploadProgress();
+    fillUploadSlots();
   };
 
   xhr.onerror = () => {
-    uploadErrors += batch.length;
-    processUploadQueue();
+    uploadActive--;
+    uploadErrors++;
+    uploadFailedNames.push(entry.file.name);
+    uploadState.done++;
+    updateUploadProgress();
+    fillUploadSlots();
   };
 
   xhr.send(formData);
+}
+
+async function finishUploadBatch() {
+  uploadState = null;
+  updateUploadProgress();
+
+  await loadFolders();
+  await loadFiles();
+  await loadProjects();
+  render();
+
+  if (uploadErrors > 0) {
+    const shown = uploadFailedNames.slice(0, 5).join(", ");
+    const more = uploadFailedNames.length > 5 ? ", …" : "";
+    alert(
+      `${uploadErrors} Datei${uploadErrors === 1 ? " konnte" : "en konnten"} nicht hochgeladen werden: ${shown}${more}\n\nBereits hochgeladene Dateien bleiben erhalten.`
+    );
+    uploadErrors = 0;
+    uploadFailedNames = [];
+  }
 }
 
 async function toggleShow(fileId, button, action) {
@@ -2204,6 +2660,27 @@ async function toggleShow(fileId, button, action) {
   }
 
   await loadFiles();
+  render();
+}
+
+async function toggleStar(file, button) {
+  const nextStarred = !file.starred;
+  if (button) button.disabled = true;
+
+  const res = await fetch(`/api/files/${file.id}/star`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ starred: nextStarred })
+  });
+
+  if (!res.ok) {
+    if (button) button.disabled = false;
+    return;
+  }
+
+  const updated = await res.json();
+  const idx = currentFiles.findIndex((f) => f.id === file.id);
+  if (idx !== -1) currentFiles[idx] = updated;
   render();
 }
 

@@ -14,6 +14,7 @@ services:
       - SMTP_USER=${SMTP_USER:-}
       - SMTP_PASS=${SMTP_PASS:-}
       - MAIL_FROM=${MAIL_FROM:-}
+      - SHOW_FEED_KEY=${SHOW_FEED_KEY:-}
     restart: unless-stopped
     networks:
       - coolify

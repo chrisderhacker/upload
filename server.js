@@ -121,6 +121,16 @@ db.exec(`
     body TEXT NOT NULL,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS folders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    category TEXT NOT NULL,
+    path TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    created_by TEXT,
+    UNIQUE(project_id, category, path)
+  );
 `);
 
 // Defensive Migration: neue Spalten nur ergänzen, wenn sie fehlen.
@@ -130,7 +140,9 @@ const newColumns = [
   ["area", "TEXT DEFAULT 'uploads'"],
   ["category", "TEXT"],
   ["status", "TEXT DEFAULT 'new'"],
-  ["uploaded_by", "TEXT"]
+  ["uploaded_by", "TEXT"],
+  ["folder", "TEXT DEFAULT ''"],
+  ["starred", "INTEGER DEFAULT 0"]
 ];
 
 for (const [name, definition] of newColumns) {
@@ -181,15 +193,22 @@ for (const [name, definition] of [["reset_token", "TEXT"], ["reset_expires", "TE
   }
 }
 
+// Erweiterungs-Listen als Rückfallebene: manche Uploads (Ordner-Drag&Drop, manche Betriebssysteme/
+// Dateitypen) liefern keinen oder nur einen generischen MIME-Type (z. B. "application/octet-stream").
+// Ohne diesen Fallback landen solche Bilder/Videos fälschlich unter "Other" statt in ihrer echten Kategorie.
+const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".avif", ".heic", ".heif", ".tif", ".tiff"];
+const VIDEO_EXTENSIONS = [".mp4", ".mov", ".webm", ".m4v", ".avi", ".mkv", ".mts", ".mxf"];
+const AUDIO_EXTENSIONS = [".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a", ".aiff"];
+
 function categorizeFile(originalName, mimeType) {
   const name = (originalName || "").toLowerCase();
   const mime = mimeType || "";
   const ext = path.extname(name);
 
   if ([".svg", ".eps", ".ai"].includes(ext)) return "logos";
-  if (mime.startsWith("video/")) return "video";
-  if (mime.startsWith("audio/")) return "audio";
-  if (mime.startsWith("image/")) return "images";
+  if (mime.startsWith("video/") || VIDEO_EXTENSIONS.includes(ext)) return "video";
+  if (mime.startsWith("audio/") || AUDIO_EXTENSIONS.includes(ext)) return "audio";
+  if (mime.startsWith("image/") || IMAGE_EXTENSIONS.includes(ext)) return "images";
   if ([".html", ".htm"].includes(ext)) return "html";
   if (/regie|ablauf|cue/.test(name)) return "regieplan";
   if ([".txt", ".doc", ".docx", ".pdf", ".xls", ".xlsx", ".csv", ".ppt", ".pptx", ".key", ".odp"].includes(ext)) return "text";
@@ -198,6 +217,33 @@ function categorizeFile(originalName, mimeType) {
 
 // Nur Video, Audio und Bilder dürfen in die Show.
 const SHOW_CATEGORIES = ["video", "audio", "images"];
+
+const ALL_CATEGORIES = new Set(["video", "audio", "images", "logos", "text", "regieplan", "html", "other"]);
+
+// Normalisiert einen Ordnerpfad: keine leeren/„.."-Segmente, mit "/" verbunden.
+function sanitizeFolderPath(raw) {
+  return (raw || "")
+    .split("/")
+    .map((seg) => seg.trim())
+    .filter((seg) => seg && seg !== "." && seg !== "..")
+    .join("/");
+}
+
+// Ein einzelnes Ordner-Segment (Name eines neuen Unterordners), keine Pfadtrennzeichen erlaubt.
+function sanitizeFolderName(raw) {
+  return (raw || "").trim().replace(/[\/\\]+/g, "");
+}
+
+const ensureFolderChain = db.transaction((projectId, category, path, userName) => {
+  const insert = db.prepare(
+    "INSERT OR IGNORE INTO folders (project_id, category, path, created_by) VALUES (?, ?, ?, ?)"
+  );
+  let acc = "";
+  for (const segment of path.split("/")) {
+    acc = acc ? `${acc}/${segment}` : segment;
+    insert.run(projectId, category, acc, userName);
+  }
+});
 
 // Idempotenter Backfill: nur Zeilen ohne Kategorie, bestehende Werte bleiben unberührt.
 const uncategorized = db
@@ -212,6 +258,29 @@ if (uncategorized.length > 0) {
     }
   });
   backfill(uncategorized);
+}
+
+// Einmalige Korrektur: Dateien, die früher mangels MIME-Type als "Other" einsortiert wurden,
+// obwohl ihre Dateiendung eindeutig Bild/Video/Audio ist (categorizeFile erkennt das jetzt auch
+// per Endung). Ordner werden dabei in der neuen Kategorie nachgezogen, damit sie sichtbar bleiben.
+const misclassified = db
+  .prepare("SELECT id, project_id, original_name, mime_type, folder, uploaded_by FROM files WHERE category = 'other'")
+  .all();
+
+if (misclassified.length > 0) {
+  const setCategory = db.prepare("UPDATE files SET category = ? WHERE id = ?");
+  const reclassify = db.transaction((rows) => {
+    for (const row of rows) {
+      const newCategory = categorizeFile(row.original_name, row.mime_type);
+      if (newCategory === "other") continue;
+
+      setCategory.run(newCategory, row.id);
+      if (row.folder) {
+        ensureFolderChain(row.project_id, newCategory, row.folder, row.uploaded_by);
+      }
+    }
+  });
+  reclassify(misclassified);
 }
 
 const existingProject = db.prepare("SELECT * FROM projects LIMIT 1").get();
@@ -672,6 +741,7 @@ app.delete("/api/projects/:projectId", requireAuth, requireAdmin, (req, res) => 
   }
 
   db.prepare("DELETE FROM files WHERE project_id = ?").run(projectId);
+  db.prepare("DELETE FROM folders WHERE project_id = ?").run(projectId);
   db.prepare("DELETE FROM people WHERE project_id = ?").run(projectId);
   db.prepare("DELETE FROM playlists WHERE project_id = ?").run(projectId);
   db.prepare("DELETE FROM project_members WHERE project_id = ?").run(projectId);
@@ -717,6 +787,79 @@ app.post(
     res.json(db.prepare("SELECT * FROM projects WHERE id = ?").get(projectId));
   }
 );
+
+/* ---------- Ordner ---------- */
+
+app.get("/api/projects/:projectId/folders", requireAuth, requireProjectAccess, (req, res) => {
+  const rows = db
+    .prepare("SELECT * FROM folders WHERE project_id = ? ORDER BY path COLLATE NOCASE ASC")
+    .all(Number(req.params.projectId));
+
+  res.json(rows);
+});
+
+app.post("/api/projects/:projectId/folders", requireAuth, requireProjectAccess, (req, res) => {
+  if (!canUpload(req.user)) {
+    return res.status(403).json({ error: "Zuschauer dürfen keine Ordner anlegen" });
+  }
+
+  const projectId = Number(req.params.projectId);
+  const category = (req.body.category || "").trim();
+  const parent = sanitizeFolderPath(req.body.parent);
+  const name = sanitizeFolderName(req.body.name);
+
+  if (!ALL_CATEGORIES.has(category)) {
+    return res.status(400).json({ error: "Ungültige Kategorie" });
+  }
+  if (!name) {
+    return res.status(400).json({ error: "Ordnername darf nicht leer sein" });
+  }
+
+  const folderPath = parent ? `${parent}/${name}` : name;
+
+  // Alle Vorfahren-Segmente mit anlegen, damit die Navigation lückenlos bleibt.
+  ensureFolderChain(projectId, category, folderPath, req.user.name);
+
+  res.json(
+    db
+      .prepare("SELECT * FROM folders WHERE project_id = ? AND category = ? AND path = ?")
+      .get(projectId, category, folderPath)
+  );
+});
+
+app.delete("/api/folders/:folderId", requireAuth, (req, res) => {
+  const folder = db.prepare("SELECT * FROM folders WHERE id = ?").get(Number(req.params.folderId));
+
+  if (!folder) {
+    return res.status(404).json({ error: "Ordner nicht gefunden" });
+  }
+  if (!canAccessProject(req.user, folder.project_id)) {
+    return res.status(403).json({ error: "Kein Zugriff auf dieses Projekt" });
+  }
+  if (!canUpload(req.user)) {
+    return res.status(403).json({ error: "Zuschauer dürfen keine Ordner löschen" });
+  }
+
+  const prefix = folder.path + "/";
+  const hasFiles = db
+    .prepare(
+      "SELECT 1 FROM files WHERE project_id = ? AND category = ? AND (folder = ? OR folder LIKE ?) LIMIT 1"
+    )
+    .get(folder.project_id, folder.category, folder.path, prefix + "%");
+
+  if (hasFiles) {
+    return res.status(400).json({ error: "Ordner ist nicht leer" });
+  }
+
+  db.prepare("DELETE FROM folders WHERE project_id = ? AND category = ? AND (path = ? OR path LIKE ?)").run(
+    folder.project_id,
+    folder.category,
+    folder.path,
+    prefix + "%"
+  );
+
+  res.json({ ok: true });
+});
 
 /* ---------- Freigabe-Links (Lesezugriff ohne Login per Token) ---------- */
 
@@ -784,7 +927,7 @@ app.get("/api/share/:token", (req, res) => {
   if (!project) return res.status(404).json({ error: "Freigabe nicht gefunden" });
 
   const files = db
-    .prepare("SELECT id, original_name, mime_type, size, category, created_at FROM files WHERE project_id = ? ORDER BY created_at DESC")
+    .prepare("SELECT id, original_name, mime_type, size, category, folder, created_at FROM files WHERE project_id = ? ORDER BY created_at DESC")
     .all(project.id)
     .map((f) => ({
       id: f.id,
@@ -792,11 +935,16 @@ app.get("/api/share/:token", (req, res) => {
       mime_type: f.mime_type,
       size: f.size,
       category: f.category,
+      folder: f.folder || "",
       created_at: f.created_at,
       url: `/api/share/${req.params.token}/file/${f.id}`
     }));
 
-  res.json({ title: project.title, image: project.image || null, files });
+  const folders = db
+    .prepare("SELECT id, category, path FROM folders WHERE project_id = ? ORDER BY path COLLATE NOCASE ASC")
+    .all(project.id);
+
+  res.json({ title: project.title, image: project.image || null, files, folders });
 });
 
 // Auslieferung einer Datei über den Freigabe-Token (inline, nur wenn zum Projekt gehörig).
@@ -851,18 +999,34 @@ app.post(
   upload.array("files"),
   (req, res) => {
     const projectId = Number(req.params.projectId);
+    const defaultFolder = sanitizeFolderPath(req.body.folder);
+
+    // Optional: pro Datei ein eigener Ordnerpfad (z. B. beim Hochladen eines ganzen Ordners),
+    // parallel zur Reihenfolge von req.files. Fällt sonst auf den gemeinsamen "folder"-Wert zurück.
+    let perFileFolders = null;
+    if (req.body.folders) {
+      try {
+        const parsed = JSON.parse(req.body.folders);
+        if (Array.isArray(parsed) && parsed.length === req.files.length) {
+          perFileFolders = parsed.map((f) => sanitizeFolderPath(f));
+        }
+      } catch {
+        perFileFolders = null;
+      }
+    }
 
     const insert = db.prepare(`
       INSERT INTO files
-      (project_id, original_name, stored_name, mime_type, size, path, area, category, status, uploaded_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (project_id, original_name, stored_name, mime_type, size, path, area, category, status, uploaded_by, folder)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const savedFiles = [];
 
-    for (const file of req.files) {
+    req.files.forEach((file, i) => {
       const relativePath = `/storage/projects/${projectId}/${file.filename}`;
       const category = categorizeFile(file.originalname, file.mimetype);
+      const folder = perFileFolders ? perFileFolders[i] : defaultFolder;
 
       const result = insert.run(
         projectId,
@@ -874,11 +1038,16 @@ app.post(
         "uploads",
         category,
         "new",
-        req.user.name
+        req.user.name,
+        folder
       );
 
+      if (folder) {
+        ensureFolderChain(projectId, category, folder, req.user.name);
+      }
+
       savedFiles.push(db.prepare("SELECT * FROM files WHERE id = ?").get(result.lastInsertRowid));
-    }
+    });
 
     res.json(savedFiles);
   }
@@ -960,6 +1129,14 @@ app.post("/api/files/:fileId/remove-from-show", requireAuth, (req, res) => {
   }
 
   db.prepare("UPDATE files SET area = 'uploads', status = 'new' WHERE id = ?").run(file.id);
+  res.json(db.prepare("SELECT * FROM files WHERE id = ?").get(file.id));
+});
+
+app.post("/api/files/:fileId/star", requireAuth, (req, res) => {
+  const file = getFileForUser(req, res);
+  if (!file) return;
+
+  db.prepare("UPDATE files SET starred = ? WHERE id = ?").run(req.body.starred ? 1 : 0, file.id);
   res.json(db.prepare("SELECT * FROM files WHERE id = ?").get(file.id));
 });
 

@@ -44,6 +44,28 @@
       color: var(--lime); border: 1px solid var(--lime); border-radius: 999px; padding: 3px 10px;
     }
     main { padding: 24px; max-width: 1200px; margin: 0 auto; }
+
+    .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+    .tab {
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 999px;
+      color: var(--text-dim); font-size: 13px; padding: 7px 14px; cursor: pointer;
+    }
+    .tab.is-active { border-color: var(--lime); color: var(--lime); }
+
+    .crumbs {
+      display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+      font-size: 13px; color: var(--text-dim); margin-bottom: 16px; min-height: 20px;
+    }
+    .crumbs button.back {
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px;
+      color: var(--text-dim); width: 26px; height: 26px; cursor: pointer; margin-right: 4px;
+    }
+    .crumbs button.back:hover { color: var(--lime); }
+    .crumbs a { color: var(--text-dim); text-decoration: none; cursor: pointer; }
+    .crumbs a:hover { color: var(--lime); }
+    .crumbs a.is-current { color: var(--text); font-weight: 700; cursor: default; pointer-events: none; }
+    .crumbs .sep { color: var(--text-dim); }
+
     .grid {
       display: grid; gap: 16px;
       grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -54,13 +76,18 @@
     }
     .thumb {
       aspect-ratio: 16 / 10; background: #050603; display: grid; place-items: center;
-      overflow: hidden; cursor: pointer;
+      overflow: hidden; cursor: pointer; position: relative;
     }
     .thumb img, .thumb video { width: 100%; height: 100%; object-fit: cover; }
     .thumb .ext { font-size: 13px; color: var(--text-dim); font-weight: 700; letter-spacing: .05em; }
+    .folder-thumb-badge {
+      position: absolute; top: 8px; left: 8px; width: 24px; height: 24px; border-radius: 7px;
+      background: rgba(0,0,0,.55); display: grid; place-items: center; color: var(--lime); font-size: 14px;
+    }
     .body { padding: 10px 12px; }
     .name { font-size: 13px; word-break: break-word; }
     .meta { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+    .folder-card .name { font-weight: 700; }
     .empty, .error { color: var(--text-dim); text-align: center; padding: 60px 20px; }
     .error { color: #ff8f8f; }
     /* Lightbox */
@@ -83,6 +110,8 @@
   </header>
 
   <main>
+    <div id="tabs" class="tabs"></div>
+    <div id="crumbs" class="crumbs"></div>
     <div id="content"></div>
   </main>
 
@@ -92,13 +121,33 @@
   </div>
 
   <script>
+    const CATEGORIES = [
+      { key: "video", label: "Video" },
+      { key: "audio", label: "Audio" },
+      { key: "images", label: "Bilder" },
+      { key: "logos", label: "Logos" },
+      { key: "text", label: "Text" },
+      { key: "regieplan", label: "Regieplan" },
+      { key: "html", label: "HTML/Tools" },
+      { key: "other", label: "Other" }
+    ];
+    const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "avif", "heic", "heif"];
+    const VIDEO_EXTENSIONS = ["mp4", "mov", "webm", "m4v", "avi", "mkv"];
+
     const token = location.pathname.split("/").filter(Boolean).pop();
     const titleEl = document.getElementById("title");
     const subEl = document.getElementById("sub");
+    const tabsEl = document.getElementById("tabs");
+    const crumbsEl = document.getElementById("crumbs");
     const contentEl = document.getElementById("content");
     const avatarEl = document.getElementById("avatar");
     const lb = document.getElementById("lb");
     const lbBody = document.getElementById("lbBody");
+
+    let allFiles = [];
+    let allFolders = [];
+    let currentCategory = null;
+    let currentFolder = "";
 
     function fmtBytes(b) {
       if (!b) return "0 B";
@@ -110,14 +159,21 @@
       const d = new Date((s || "").replace(" ", "T") + "Z");
       return isNaN(d) ? "" : d.toLocaleDateString("de-DE");
     }
+    function isImageFile(f) {
+      const ext = (f.original_name || "").toLowerCase().split(".").pop();
+      return (f.mime_type && f.mime_type.startsWith("image/")) || IMAGE_EXTENSIONS.includes(ext);
+    }
+    function isVideoFile(f) {
+      const ext = (f.original_name || "").toLowerCase().split(".").pop();
+      return (f.mime_type && f.mime_type.startsWith("video/")) || VIDEO_EXTENSIONS.includes(ext);
+    }
 
     function openLightbox(file) {
       lbBody.innerHTML = "";
-      const mime = file.mime_type || "";
       let el;
-      if (mime.startsWith("image/")) { el = document.createElement("img"); el.src = file.url; }
-      else if (mime.startsWith("video/")) { el = document.createElement("video"); el.src = file.url; el.controls = true; el.autoplay = true; }
-      else if (mime.startsWith("audio/")) { el = document.createElement("audio"); el.src = file.url; el.controls = true; el.autoplay = true; }
+      if (isImageFile(file)) { el = document.createElement("img"); el.src = file.url; }
+      else if (isVideoFile(file)) { el = document.createElement("video"); el.src = file.url; el.controls = true; el.autoplay = true; }
+      else if ((file.mime_type || "").startsWith("audio/")) { el = document.createElement("audio"); el.src = file.url; el.controls = true; el.autoplay = true; }
       else { window.open(file.url, "_blank"); return; }
       lbBody.appendChild(el);
       lb.classList.add("open");
@@ -125,16 +181,15 @@
     document.getElementById("lbClose").onclick = () => { lb.classList.remove("open"); lbBody.innerHTML = ""; };
     lb.onclick = (e) => { if (e.target === lb) { lb.classList.remove("open"); lbBody.innerHTML = ""; } };
 
-    function buildCard(file) {
+    function buildFileCard(file) {
       const card = document.createElement("div");
       card.className = "card";
 
       const thumb = document.createElement("div");
       thumb.className = "thumb";
-      const mime = file.mime_type || "";
-      if (mime.startsWith("image/")) {
+      if (isImageFile(file)) {
         const img = document.createElement("img"); img.src = file.url; img.loading = "lazy"; thumb.appendChild(img);
-      } else if (mime.startsWith("video/")) {
+      } else if (isVideoFile(file)) {
         const v = document.createElement("video"); v.src = file.url; v.muted = true; v.preload = "metadata"; thumb.appendChild(v);
       } else {
         const ext = document.createElement("span"); ext.className = "ext";
@@ -156,6 +211,168 @@
       return card;
     }
 
+    function folderPreviewFile(category, path) {
+      const prefix = path + "/";
+      const inPath = (f) => f.folder === path || (f.folder || "").startsWith(prefix);
+      const matches = allFiles.filter((f) => f.category === category && inPath(f));
+      return matches.find((f) => isImageFile(f) || isVideoFile(f)) || null;
+    }
+
+    function folderFileCount(category, path) {
+      const prefix = path + "/";
+      return allFiles.filter((f) => f.category === category && (f.folder === path || (f.folder || "").startsWith(prefix))).length;
+    }
+
+    function buildFolderCard(folder) {
+      const card = document.createElement("div");
+      card.className = "card folder-card";
+      card.onclick = () => navigateFolder(folder.path);
+
+      const thumb = document.createElement("div");
+      thumb.className = "thumb";
+      const rep = folderPreviewFile(folder.category, folder.path);
+      if (rep && isImageFile(rep)) {
+        const img = document.createElement("img"); img.src = rep.url; img.loading = "lazy"; thumb.appendChild(img);
+      } else if (rep && isVideoFile(rep)) {
+        const v = document.createElement("video"); v.src = rep.url; v.muted = true; v.preload = "metadata"; thumb.appendChild(v);
+      } else {
+        const ext = document.createElement("span"); ext.className = "ext"; ext.textContent = "📁";
+        thumb.appendChild(ext);
+      }
+      const badge = document.createElement("span");
+      badge.className = "folder-thumb-badge";
+      badge.textContent = "📁";
+      thumb.appendChild(badge);
+      card.appendChild(thumb);
+
+      const body = document.createElement("div");
+      body.className = "body";
+      const name = document.createElement("div");
+      name.className = "name"; name.textContent = folder.path.split("/").pop();
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      const count = folderFileCount(folder.category, folder.path);
+      meta.textContent = "Ordner · " + count + " Datei" + (count === 1 ? "" : "en");
+      body.appendChild(name); body.appendChild(meta);
+      card.appendChild(body);
+      return card;
+    }
+
+    function directSubfolders(category, parent) {
+      const prefix = parent ? parent + "/" : "";
+      const seen = new Set();
+      const result = [];
+      for (const folder of allFolders) {
+        if (folder.category !== category || !folder.path.startsWith(prefix)) continue;
+        const rest = folder.path.slice(prefix.length);
+        if (!rest || rest.includes("/")) continue;
+        if (seen.has(folder.path)) continue;
+        seen.add(folder.path);
+        result.push(folder);
+      }
+      return result.sort((a, b) => a.path.localeCompare(b.path, "de", { sensitivity: "base" }));
+    }
+
+    function selectCategory(key) {
+      currentCategory = key;
+      currentFolder = "";
+      renderAll();
+    }
+
+    function navigateFolder(path) {
+      currentFolder = path;
+      renderAll();
+    }
+
+    function renderTabs() {
+      tabsEl.innerHTML = "";
+
+      const makeTab = (key, label, count) => {
+        const tab = document.createElement("button");
+        tab.type = "button";
+        tab.className = "tab" + (currentCategory === key ? " is-active" : "");
+        tab.textContent = label + " · " + count;
+        tab.onclick = () => selectCategory(key);
+        return tab;
+      };
+
+      tabsEl.appendChild(makeTab(null, "Alle", allFiles.length));
+      for (const cat of CATEGORIES) {
+        const count = allFiles.filter((f) => f.category === cat.key).length;
+        if (count === 0) continue;
+        tabsEl.appendChild(makeTab(cat.key, cat.label, count));
+      }
+    }
+
+    function renderCrumbs() {
+      crumbsEl.innerHTML = "";
+      if (!currentCategory) return;
+
+      if (currentFolder) {
+        const back = document.createElement("button");
+        back.className = "back";
+        back.type = "button";
+        back.title = "Eine Ebene zurück";
+        back.textContent = "←";
+        back.onclick = () => {
+          const parts = currentFolder.split("/");
+          parts.pop();
+          navigateFolder(parts.join("/"));
+        };
+        crumbsEl.appendChild(back);
+      }
+
+      const catLabel = (CATEGORIES.find((c) => c.key === currentCategory) || {}).label || currentCategory;
+      const segments = currentFolder ? currentFolder.split("/") : [];
+
+      const root = document.createElement("a");
+      root.textContent = catLabel;
+      root.className = segments.length === 0 ? "is-current" : "";
+      root.onclick = () => navigateFolder("");
+      crumbsEl.appendChild(root);
+
+      let acc = "";
+      segments.forEach((seg, i) => {
+        acc = acc ? acc + "/" + seg : seg;
+        const sep = document.createElement("span");
+        sep.className = "sep";
+        sep.textContent = "/";
+        crumbsEl.appendChild(sep);
+
+        const path = acc;
+        const a = document.createElement("a");
+        a.textContent = seg;
+        if (i === segments.length - 1) a.className = "is-current";
+        a.onclick = () => navigateFolder(path);
+        crumbsEl.appendChild(a);
+      });
+    }
+
+    function renderContent() {
+      contentEl.innerHTML = "";
+
+      const folders = currentCategory ? directSubfolders(currentCategory, currentFolder) : [];
+      let files = currentCategory ? allFiles.filter((f) => f.category === currentCategory) : allFiles;
+      if (currentCategory) files = files.filter((f) => (f.folder || "") === currentFolder);
+
+      if (folders.length === 0 && files.length === 0) {
+        contentEl.innerHTML = '<p class="empty">Noch keine Dateien oder Ordner hier.</p>';
+        return;
+      }
+
+      const grid = document.createElement("div");
+      grid.className = "grid";
+      for (const folder of folders) grid.appendChild(buildFolderCard(folder));
+      for (const file of files) grid.appendChild(buildFileCard(file));
+      contentEl.appendChild(grid);
+    }
+
+    function renderAll() {
+      renderTabs();
+      renderCrumbs();
+      renderContent();
+    }
+
     async function load() {
       let res;
       try { res = await fetch("/api/share/" + encodeURIComponent(token)); }
@@ -174,15 +391,15 @@
       subEl.textContent = data.files.length + " Datei" + (data.files.length === 1 ? "" : "en");
       if (data.image) { avatarEl.src = data.image; avatarEl.hidden = false; }
 
-      if (data.files.length === 0) {
+      allFiles = data.files;
+      allFolders = data.folders || [];
+
+      if (allFiles.length === 0 && allFolders.length === 0) {
         contentEl.innerHTML = '<p class="empty">Noch keine Dateien in diesem Projekt.</p>';
         return;
       }
 
-      const grid = document.createElement("div");
-      grid.className = "grid";
-      for (const file of data.files) grid.appendChild(buildCard(file));
-      contentEl.appendChild(grid);
+      renderAll();
     }
 
     load();

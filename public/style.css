@@ -592,6 +592,89 @@ body {
   color: var(--lime);
 }
 
+/* ---------- Ordner ---------- */
+
+.folder-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.folder-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.folder-back {
+  flex: 0 0 auto;
+}
+
+.folder-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.folder-crumbs a {
+  color: var(--text-dim);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.folder-crumbs a:hover {
+  color: var(--lime);
+}
+
+.folder-crumbs a.is-current {
+  color: var(--text);
+  font-weight: 700;
+  cursor: default;
+  pointer-events: none;
+}
+
+.folder-crumb-sep {
+  color: var(--text-dim);
+}
+
+.folder-card .preview {
+  cursor: pointer;
+  position: relative;
+}
+
+.folder-preview-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  color: var(--lime);
+}
+
+.folder-preview-badge .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.dropzone-folder-link {
+  color: var(--lime);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* ---------- Ansicht-Regler & Sortierung ---------- */
 
 .view-controls {
@@ -685,6 +768,10 @@ body {
   align-items: center;
 }
 
+.file-grid.is-list .file-star {
+  display: none;
+}
+
 .file-grid.is-list .preview {
   flex: 0 0 96px;
   width: 96px;
@@ -770,6 +857,34 @@ body {
   background: #000;
   display: grid;
   place-items: center;
+  position: relative;
+}
+
+.file-star {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.file-star:hover {
+  color: var(--lime);
+}
+
+.file-star.is-active {
+  color: var(--lime);
+  background: rgba(204, 255, 0, 0.16);
 }
 
 .preview img,
